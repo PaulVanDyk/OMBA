@@ -256,4 +256,53 @@ class PlayBookResultsCollectorToSave(CallbackBase):
         if self.logId:AnsibleSaveResult.PlayBook.insert(self.logId, msg)
 
     def v2_runner_item_on_failed(self, result):
+        delegated_vars = result._result.get('_ansible_delegated_vars', None)
+        msg = "failed:"
+        if delegated_vars:
+            msg += " [%s -> %s]" % (result._host.get_name(), delegated_vars['ansible_host'])
+        else:
+            msg += " [%s] => (item=%s) => %s" % (result._host.get_name(), result._result['item'], self._dump_results(result._result))
+        print msg
+        DsRedis.OpsAnsiblePlayBook.lpush(self.redisKey, msg)
+        if self.logId:AnsibleSaveResult.PlayBook.insert(self.logId, msg)
+
+    def v2_runner_item_on_skipped(self, result):
+        msg = "skipping: [%s] => (item=%s)" % (result._host.get_name(), self._get_item(result._result))
+        if (self._display.verbosity > 0 or '_ansible_verbose_always' in result._result) and not '_ansible_verbose_override' in result._result:
+            msg += " => %s" % json.dumps(result._result)
+        DsRedis.OpsAnsiblePlayBook.lpush(self.redisKey, msg)
+        if self.logId:AnsibleSaveResult.PlayBook.insert(self.logId, msg)
+
+    def v2_runner_retry(self, result):
         task_name = result.task_name or result._task
+        msg = "FAILED - RETRYING: %s (%d retries left)." % (task_name, result._result['retries'] - result._result['attempts'])
+        if (self._display.verbosity > 2 or '_ansible_verbose_always' in result._result) and not '_ansible_verbose_override' in result._result:
+            msg += " Result was: %s" % json.dumps(result._result, indent=4)
+        DsRedis.OpsAnsiblePlayBook.lpush(self.redisKey, msg)
+        if self.logId: AnsibleSaveResult.PlayBook.insert(self.logId, msg)
+
+class PlayBookResultsCollector(CallbackBase):
+    CALLBACK_VERSION = 2.0
+    def __init__(self, *args, **kwargs):
+        super(PlayBookResultsCollector, self).__init__(*args, **kwargs)
+        self.task_ok = {}
+        self.task_skipped = {}
+        self.task_failed = {}
+        self.task_status = {}
+        self.task_unreachable = {}
+        self.task_changed = {}
+
+    def v2_runner_on_ok(self, result, *args, **kwargs):
+        self.task_ok[result._host.get_name()] = result
+
+    def v2_runner_on_failed(self, result, *args, **kwargs):
+        self.task_failed[result._host.get_name()] = result
+
+    def v2_runner_on_unreachable(self, result):
+        self.task_unreachable[result._host.get_name()] = result
+
+    def v2_runner_on_skipped(self, result):
+        self.task_ok[result._host.get_name()] = result
+
+    def v2_runner_on_changed(self, result):
+        self.task_changed[result._host.get_name()] = result
