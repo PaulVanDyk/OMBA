@@ -760,3 +760,117 @@ class ANSRunner(object):
             return data_list
         else:
             return False
+
+    def handle_cmdb_crawHw_data(self, data):
+        """
+        handle_cmdb_crawHw_data
+        :param data:
+        :return:
+        """
+        data_list = []
+        for k, v in json.loads(data).items():
+            if k == "success":
+                for x, y in v.items():
+                    cmdb_data = {}
+                    cmdb_data['ip'] = x
+                    data = y.get('ansible_facts')
+                    cmdb_data['mem_info'] = data.get('ansible_mem_detailed_info')
+                    cmdb_data['disk_info'] = data.get('ansible_disk_detailed_info')
+                    data_list.append(cmdb_data)
+        if data_list:
+            return data_list
+        else:
+            return False
+
+    def handle_model_data(self, data, module_name, module_args=None):
+        """
+        处理 ansible 模块输出内容
+        :param data:
+        :param module_name:
+        :param module_args:
+        :return:
+        """
+        module_data = json.loads(data)
+        failed = module_data.get('failed')
+        success = module_data.get('success')
+        unreachable = module_data.get('unreachable')
+        data_list = []
+        if module_name == "raw":
+            if failed:
+                for x, y in failed.items():
+                    data = {}
+                    data['ip'] = x
+                    try:
+                        data['msg'] = y.get('stdout').replace('\t\t', '<br>').replace('\r\n', '<br>').replace('\t', '<br>')
+                    except:
+                        data['msg'] = None
+                    if y.get('rc') == 0:
+                        data['status'] = 'succeed'
+                    else:
+                        data['status'] = 'failed'
+                    data_list.append(data)
+            elif success:
+                for x, y in success.items():
+                    data = {}
+                    data['ip'] = x
+                    try:
+                        data['msg'] = y.get('stdout').replace('\t\t', '<br>').replace('\r\n', '<br>').replace('\t', '<br>')
+                    except:
+                        data['msg'] = None
+                    if y.get('rc') == 0:
+                        data['status'] = 'succeed'
+                    else:
+                        data['status'] = 'failed'
+                    data_list.append(data)
+        elif module_name == "ping":
+            if success:
+                for x, y in success.items():
+                    data = {}
+                    data['ip'] = x
+                    if y.get('ping'):
+                        data['msg'] = y.get('ping')
+                        data['status'] = 'succeed'
+                    data_list.append(data)
+        else:
+            if success:
+                for x, y in success.items():
+                    data = {}
+                    data['ip'] = x
+                    if y.get('invocation'):
+                        data['msg'] = "Ansible %s with %s execute success." % (module_name, module_args)
+                        data['status'] = 'succeed'
+                    data_list.append(data)
+
+            elif failed:
+                for x, y in failed.items():
+                    data = {}
+                    data['ip'] = x
+                    data['msg'] = y.get('msg')
+                    data['status'] = 'failed'
+                    data_list.append(data)
+        if unreachable:
+            for x, y in unreachable.items():
+                data = {}
+                data['ip'] = x
+                data['msg'] = y.get('msg')
+                data['status'] = 'failed'
+                data_list.append(data)
+        if data_list:
+            return data_list
+        else:
+            return False
+
+
+if __name__ == '__main__':
+    resource = [
+        {"hostname": "192.168.1.235"},
+        {"hostname": "192.168.1.234"},
+        {"hostname": "192.168.1.233"},
+    ]
+
+    rbt = ANSRunner(resource, redisKey='1')
+    rbt.run_model(
+        host_list=["192.168.1.235", "192.168.1.234", "192.168.1.233"],
+        module_name='yum',
+        module_args="name=htop state=present"
+    )
