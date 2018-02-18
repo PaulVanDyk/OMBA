@@ -11,10 +11,83 @@ https://docs.djangoproject.com/en/1.11/ref/settings/
 """
 
 import os
+import djcelery
+from celery import platforms
+from kombu import Queue, Exchange
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+
+''' celery config '''
+djcelery.setup_loader()
+BROKER_URL = 'redis://127.0.0.1:6379/4'
+CELERY_RESULT_BACKEND = 'djcelery.backends.database.DatabaseBackend'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TASK_SERIALIZER = 'pickle'
+CELERY_ACCEPT_CONTENT = ['pickle', 'json']
+CELERYBEAT_SCHEDULER = 'djcelery.schedulers.DatabaseScheduler'
+CELERY_TASK_RESULT_EXPIRES = 60 * 60 * 24
+CELERYD_MAX_TASKS_PER_CHILD = 40
+CELERY_TRACK_STARTED = True
+CELERY_ENABLE_UTC = False
+CELERY_TIMEZONE = 'Asia/Shanghai'
+platforms.C_FORCE_ROOT = True
+
+# celery route config
+CELERY_IMPORTS = (
+    "OMBA.tasks.assets",
+    "OMBA.tasks.ansible",
+    "OMBA.tasks.cron",
+    "OMBA.tasks.deploy",
+    "OMBA.tasks.sched"
+)
+CELERY_QUEUES = (
+    Queue(
+        'default',
+        Exchange('default'),
+        routing_key='default'
+    ),
+    Queue(
+        'ansible',
+        Exchange('ansible'),
+        routing_key='ansible_#'
+    ),
+)
+CELERY_ROUTES = {
+    'OMBA.tasks.assets.*': {
+        'queue': 'default',
+        'routing_key': 'default'
+    },
+    'OMBA.tasks.cron.*': {
+        'queue': 'default',
+        'routing_key': 'default'
+    },
+    'OMBA.tasks.sched.*': {
+        'queue': 'default',
+        'routing_key': 'default'
+    },
+    'OMBA.tasks.ansible.AnsibleScripts': {
+        'queue': 'ansible',
+        'routing_key': 'ansible_scripts'
+    },
+    'OMBA.tasks.ansible.AnsiblePlayBook': {
+        'queue': 'ansible',
+        'routing_key': 'ansible_playbook'
+    },
+}
+CELERY_DEFAULT_QUEUE = 'default'
+CELERY_DEFAULT_EXCHANGE_TYPE = 'direct'
+CELERY_DEFAULT_ROUTING_KEY = 'default'
+
+
+REDSI_KWARGS_LPUSH = {
+    'host': '127.0.0.1',
+    'port': 6379,
+    'db': 3
+}
+
+REDSI_LPUSH_POOL = None
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/1.11/howto/deployment/checklist/
@@ -25,7 +98,24 @@ SECRET_KEY = '!cz5onp5ua41je$6$y+q#iuhxxp+#_@t*1@02^a@&_i=@2*hi$'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
+
+
+# Channels settings
+CHANNEL_LAYERS = {
+    "default": {
+       "BACKEND": "asgi_redis.RedisChannelLayer",  # use redis backend
+       "CONFIG": {
+           "hosts": [("localhost", 6379)],  # set redis address
+           "channel_capacity": {
+               "http.request": 1000,
+               "websocket.send*": 10000,
+           },
+           "capacity": 10000,
+           },
+       "ROUTING": "OMBA.routing.channel_routing",  # load routing from our routing.py file
+       },
+}
 
 
 # Application definition
@@ -37,6 +127,10 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'OMBA',
+    'rest_framework',
+    'djcelery',
+    'channels',
 ]
 
 MIDDLEWARE = [
@@ -49,13 +143,21 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
+}
+
 ROOT_URLCONF = 'OMBA.urls'
 
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [os.path.join(BASE_DIR, 'templates')]
-        ,
+        'DIRS': [
+            os.path.join(BASE_DIR, 'static'),
+            os.path.join(BASE_DIR, 'templates')
+        ],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -76,8 +178,11 @@ WSGI_APPLICATION = 'OMBA.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'omba',
+        'USER': 'root',
+        'PASSWORD': 'atompi123',
+        'HOST': '127.0.0.1'
     }
 }
 
@@ -119,3 +224,9 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/1.11/howto/static-files/
 
 STATIC_URL = '/static/'
+
+STATICFILES_DIRS = (
+    os.path.join(BASE_DIR, 'static')
+)
+
+LOGIN_URL = '/login'
