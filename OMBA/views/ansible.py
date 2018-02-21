@@ -262,4 +262,103 @@ def app_upload(request):
             ans_server=','.join(sList)
         )
         return HttpResponseRedirect('apps/playbook/upload/')
-    
+
+
+@login_required()
+@permission_required('OpsManage.can_add_ansible_playbook', login_url='/noperm/')
+def apps_online(request):
+    if request.method == "GET":
+        serverList = Server_Assets.objects.all()
+        groupList = Group.objects.all()
+        userList = User.objects.all()
+        serviceList = Service_Assets.objects.all()
+        projectList = Project_Assets.objects.all()
+        return render(
+            request,
+            'apps/apps_playbook_online.html',
+            {
+                "user": request.user,
+                "userList": userList,
+                "serverList": serverList,
+                "groupList": groupList,
+                "serviceList": serviceList,
+                "projectList": projectList
+            },
+        )
+    elif request.method == "POST":
+        sList = []
+        playbook_server_value = None
+        if request.POST.get('server_model') in ['service', 'group', 'custom']:
+            if request.POST.get('server_model') == 'custom':
+                for sid in request.POST.getlist('playbook_server[]'):
+                    server = Server_Assets.objects.get(id=sid)
+                    sList.append(server.ip)
+                playbook_server_value = None
+            elif request.POST.get('server_model') == 'group':
+                serverList = Assets.objects.filter(group=request.POST.get('ansible_group'))
+                sList = [s.server_assets.ip for s in serverList]
+                playbook_server_value = request.POST.get('ansible_group')
+            elif request.POST.get('server_model') == 'service':
+                serverList = Assets.objects.filter(business=request.POST.get('ansible_service'))
+                sList = [s.server_assets.ip for s in serverList]
+                playbook_server_value = request.POST.get('ansible_service')
+        fileName = '/upload/playbook/online-{ram}.yaml'.format(ram=uuid.uuid4().hex[0:8])
+        filePath = os.getcwd() + fileName
+        if request.POST.get('playbook_content'):
+            if os.path.isdir(os.path.dirname(filePath)) is not True:
+                os.makedirs(os.path.dirname(filePath))  # 判断文件存放的目录是否存在，不存在就创建
+            with open(filePath, 'w') as f:
+                f.write(request.POST.get('playbook_content'))
+        else:
+            return JsonResponse(
+                {
+                    'msg': "文件内容不能为空",
+                    "code": 500,
+                    'data': []
+                }
+            )
+        try:
+            playbook = Ansible_Playbook.objects.create(
+                playbook_name=request.POST.get('playbook_name'),
+                playbook_desc=request.POST.get('playbook_desc'),
+                playbook_vars=request.POST.get('playbook_vars'),
+                playbook_uuid=uuid.uuid4(),
+                playbook_file=fileName,
+                playbook_server_model=request.POST.get('server_model', 'custom'),
+                playbook_server_value=playbook_server_value,
+                playbook_auth_group=request.POST.get('playbook_auth_group', 0),
+                playbook_auth_user=request.POST.get('playbook_auth_user', 0),
+                playbook_type=1
+            )
+        except Exception, ex:
+            return JsonResponse(
+                {
+                    'msg': str(ex),
+                    "code": 500,
+                    'data': []
+                }
+            )
+        for sip in sList:
+            try:
+                Ansible_Playbook_Number.objects.create(
+                    playbook=playbook,
+                    playbook_server=sip
+                )
+            except Exception, ex:
+                playbook.delete()
+                print ex
+        # 操作日志异步记录
+        AnsibleRecord.PlayBook.insert(
+            user=str(request.user),
+            ans_id=playbook.id,
+            ans_name=playbook.playbook_name,
+            ans_content="添加Ansible剧本",
+            ans_server=','.join(sList)
+        )
+        return JsonResponse(
+            {
+                'msg': None,
+                "code": 200,
+                'data': []
+            }
+        )
