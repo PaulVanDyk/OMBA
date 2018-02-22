@@ -156,6 +156,7 @@ def apps_model(request):
         else:
             return JsonResponse({'msg': "操作失败，不支持的操作类型", "code": 500, 'data': []})
 
+
 @login_required()
 def ansible_run(request):
     if request.method == "POST":
@@ -177,6 +178,7 @@ def ansible_run(request):
                     'data': []
                 }
             )
+
 
 @login_required()
 @permission_required('OMBA.can_add_ansible_playbook', login_url='/noperm/')
@@ -362,3 +364,69 @@ def apps_online(request):
                 'data': []
             }
         )
+
+
+@login_required()
+@permission_required('OpsManage.can_read_ansible_playbook', login_url='/noperm/')
+def apps_list(request):
+    if request.method == "GET":
+        # 获取已登录用户的user id跟group id
+        uid = User.objects.get(username=request.user).id
+        gList = []
+        for group in User.objects.get(username=request.user).groups.values():
+            gList.append(group.get('id'))
+        # 获取剧本数据列表
+        playbookList = Ansible_Playbook.objects.all()
+        for ds in playbookList:
+            ds.ansible_playbook_number = Ansible_Playbook_Number.objects.filter(playbook=ds)
+            # 如果用户在授权组或者是授权用户，设置runid等于项目id
+            if ds.playbook_auth_group in gList or ds.playbook_auth_user == uid:
+                ds.runid = ds.id
+            # 如果剧本没有授权默认所有用户都可以使用
+            elif ds.playbook_auth_group == 0 and ds.playbook_auth_user == 0:
+                ds.runid = ds.id
+        return render(
+            request,
+            'apps/apps_list.html',
+            {
+                "user": request.user,
+                "playbookList": playbookList,
+            }
+        )
+
+
+@login_required()
+@permission_required('OpsManage.can_add_ansible_playbook', login_url='/noperm/')
+def apps_playbook_file(request, pid):
+    try:
+        playbook = Ansible_Playbook.objects.get(id=pid)
+    except:
+        return JsonResponse(
+            {
+                'msg': "剧本不存在，可能已经被删除.",
+                "code": 200,
+                'data': []
+            }
+        )
+    if request.method == "POST":
+        playbook_file = os.getcwd() + '/' + str(playbook.playbook_file)
+        if os.path.exists(playbook_file):
+            content = ''
+            with open(playbook_file, "r") as f:
+                for line in f.readlines():
+                    content = content + line
+            return JsonResponse(
+                {
+                    'msg': "剧本获取成功",
+                    "code": 200,
+                    'data': content
+                }
+            )
+        else:
+            return JsonResponse(
+                {
+                    'msg': "剧本不存在，可能已经被删除.",
+                    "code": 500,
+                    'data': []
+                }
+            )
