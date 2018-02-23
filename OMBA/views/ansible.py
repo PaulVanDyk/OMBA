@@ -430,3 +430,164 @@ def apps_playbook_file(request, pid):
                     'data': []
                 }
             )
+
+
+@login_required()
+@permission_required('OpsManage.can_read_ansible_playbook', login_url='/noperm/')
+def apps_playbook_run(request, pid):
+    try:
+        playbook = Ansible_Playbook.objects.get(id=pid)
+        numberList = Ansible_Playbook_Number.objects.filter(playbook=playbook)
+        if numberList:
+            serverList = []
+        else:
+            serverList = Server_Assets.objects.all()
+    except:
+        return render(
+            request,
+            'apps/apps_playbook.html',
+            {
+                "user": request.user,
+                "ans_uuid": playbook.playbook_uuid,
+                "errorInfo": "剧本不存在，可能已经被删除."
+            },
+        )
+    if request.method == "GET":
+        return render(
+            request,
+            'apps/apps_playbook.html',
+            {
+                "user": request.user,
+                "playbook": playbook,
+                "serverList": serverList,
+                "numberList": numberList
+            },
+        )
+    elif request.method == "POST" and request.user.has_perm('OpsManage.can_exec_ansible_playbook'):
+        if DsRedis.OpsAnsiblePlayBookLock.get(redisKey=playbook.playbook_uuid + '-locked') is None:  # 判断剧本是否有人在执行
+            # 加上剧本执行锁
+            DsRedis.OpsAnsiblePlayBookLock.set(redisKey=playbook.playbook_uuid + '-locked', value=request.user)
+            # 删除旧的执行消息
+            DsRedis.OpsAnsiblePlayBook.delete(playbook.playbook_uuid)
+            playbook_file = os.getcwd() + '/' + str(playbook.playbook_file)
+            sList = []
+            resource = []
+            if numberList:
+                serverList = [s.playbook_server for s in numberList]
+            else:
+                serverList = request.POST.getlist('playbook_server')
+            for server in serverList:
+                server_assets = Server_Assets.objects.get(ip=server)
+                sList.append(server_assets.ip)
+                if server_assets.keyfile == 1:
+                    resource.append(
+                        {
+                            "hostname": server_assets.ip,
+                            "port": int(server_assets.port),
+                            "username": server_assets.username
+                        }
+                    )
+                else:
+                    resource.append(
+                        {
+                            "hostname": server_assets.ip,
+                            "port": int(server_assets.port),
+                            "username": server_assets.username,
+                            "password": server_assets.passwd
+                        }
+                    )
+            if playbook.playbook_vars:
+                playbook_vars = playbook.playbook_vars
+            else:
+                playbook_vars = request.POST.get('playbook_vars')
+            try:
+                if len(playbook_vars) == 0:
+                    playbook_vars = dict()
+                else:
+                    playbook_vars = json.loads(playbook_vars)
+                playbook_vars['host'] = sList
+            except Exception, e:
+                DsRedis.OpsAnsiblePlayBookLock.delete(redisKey=playbook.playbook_uuid + '-locked')
+                return JsonResponse(
+                    {
+                        'msg': "剧本外部变量不是Json格式",
+                        "code": 500,
+                        'data': []
+                    }
+                )
+            logId = AnsibleRecord.PlayBook.insert(
+                user=str(request.user),
+                ans_id=playbook.id,
+                ans_name=playbook.playbook_name,
+                ans_content="执行Ansible剧本",
+                ans_server=','.join(sList)
+            )
+            # 执行 ansible playbook
+            if request.POST.get('ansible_debug') == 'on':
+                ANS = ANSRunner(
+                    resource,
+                    redisKey=playbook.playbook_uuid,
+                    logId=logId,
+                    verbosity=4
+                )
+            else:
+                ANS = ANSRunner(
+                    resource,
+                    redisKey=playbook.playbook_uuid,
+                    logId=logId
+                )
+            ANS.run_playbook(
+                host_list=sList,
+                playbook_path=playbook_file,
+                extra_vars=playbook_vars
+            )
+            # 获取结果
+            result = ANS.get_playbook_result()
+            dataList = []
+            statPer = {
+                "unreachable": 0,
+                "skipped": 0,
+                "changed": 0,
+                "ok": 0,
+                "failed": 0
+            }
+            for k, v in result.get('status').items():
+                v['host'] = k
+                if v.get('failed') > 0 or v.get('unreachable') > 0:
+                    v['result'] = 'Failed'
+                else:
+                    v['result'] = 'Succeed'
+                dataList.append(v)
+                statPer['unreachable'] = v['unreachable'] + statPer['unreachable']
+                statPer['skipped'] = v['skipped'] + statPer['skipped']
+                statPer['changed'] = v['changed'] + statPer['changed']
+                statPer['failed'] = v['failed'] + statPer['failed']
+                statPer['ok'] = v['ok'] + statPer['ok']
+            DsRedis.OpsAnsiblePlayBook.lpush(playbook.playbook_uuid, "[Done] Ansible Done.")
+            # 切换版本之后取消项目部署锁
+            DsRedis.OpsAnsiblePlayBookLock.delete(redisKey=playbook.playbook_uuid + '-locked')
+            # 操作日志异步记录
+            # recordAnsiblePlaybook.delay(
+            #     user=str(request.user),
+            #     ans_id=playbook.id,
+            #     ans_name=playbook.playbook_name,
+            #     ans_content="执行Ansible剧本",
+            #     uuid=playbook.playbook_uuid,
+            #     ans_server=','.join(sList)
+            # )
+            return JsonResponse(
+                {
+                    'msg': "操作成功",
+                    "code": 200,
+                    'data': dataList,
+                    "statPer": statPer
+                }
+            )
+        else:
+            return JsonResponse(
+                {
+                    'msg': "剧本执行失败，{user}正在执行该剧本".format(user=DsRedis.OpsAnsiblePlayBookLock.get(playbook.playbook_uuid + '-locked')),
+                    "code": 500,
+                    'data': []
+                }
+            )
