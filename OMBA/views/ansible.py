@@ -591,3 +591,138 @@ def apps_playbook_run(request, pid):
                     'data': []
                 }
             )
+
+
+@login_required()
+@permission_required('OpsManage.can_change_ansible_playbook', login_url='/noperm/')
+def apps_playbook_modf(request, pid):
+    try:
+        playbook = Ansible_Playbook.objects.get(id=pid)
+        numberList = Ansible_Playbook_Number.objects.filter(playbook=playbook)
+    except:
+        return render(
+            request,
+            'apps/apps_playbook_modf.html',
+            {
+                "user": request.user,
+                "errorInfo": "剧本不存在，可能已经被删除."
+            },
+        )
+    if request.method == "GET":
+        numberList = [s.playbook_server for s in numberList]
+        serverList = Server_Assets.objects.all()
+        projectList = Project_Assets.objects.all()
+        for ds in serverList:
+            if ds.ip in numberList:
+                ds.count = 1
+            else:
+                ds.count = 0
+        if playbook.playbook_type == 1:
+            playbook_file = os.getcwd() + '/' + str(playbook.playbook_file)
+            if os.path.exists(playbook_file):
+                content = ''
+                with open(playbook_file,"r") as f:
+                    for line in f.readlines():
+                        content = content + line
+                playbook.playbook_contents = content
+        groupList = Group.objects.all()
+        userList = User.objects.all()
+        serviceList = Service_Assets.objects.all()
+        try:
+            project = Service_Assets.objects.get(id=playbook.playbook_server_value).project
+            serviceList = Service_Assets.objects.filter(project=project)
+        except:
+            project = None
+        return render(
+            request,
+            'apps/apps_playbook_modf.html',
+            {
+                "user": request.user,
+                "userList": userList,
+                "projectList": projectList,
+                "playbook": playbook,
+                "serverList": serverList,
+                "project": project,
+                "groupList": groupList,
+                "serviceList": serviceList
+            },
+        )
+    elif request.method == "POST":
+        sList = []
+        playbook_server_value = None
+        if request.POST.get('server_model') in ['service', 'group', 'custom']:
+            if request.POST.get('server_model') == 'custom':
+                if playbook.playbook_type == 1:
+                    serverList = request.POST.getlist('playbook_server[]')
+                else:
+                    serverList = request.POST.getlist('playbook_server')
+                for sid in serverList:
+                    server = Server_Assets.objects.get(id=sid)
+                    sList.append(server.ip)
+            elif request.POST.get('server_model') == 'group':
+                serverList = Assets.objects.filter(group=request.POST.get('ansible_group'))
+                sList = [s.server_assets.ip for s in serverList]
+                playbook_server_value = request.POST.get('ansible_group')
+            elif request.POST.get('server_model') == 'service':
+                serverList = Assets.objects.filter(business=request.POST.get('ansible_service'))
+                sList = [s.server_assets.ip for s in serverList]
+                playbook_server_value = request.POST.get('ansible_service')
+            if playbook.playbook_type == 1:
+                playbook_file = os.getcwd() + '/' + str(playbook.playbook_file)
+                with open(playbook_file, 'w') as f:
+                    f.write(request.POST.get('playbook_content'))
+        try:
+            Ansible_Playbook.objects.filter(id=pid).update(
+                playbook_name=request.POST.get('playbook_name'),
+                playbook_desc=request.POST.get('playbook_desc'),
+                playbook_vars=request.POST.get('playbook_vars', None),
+                playbook_server_model=request.POST.get('server_model', 'custom'),
+                playbook_server_value=playbook_server_value,
+                playbook_auth_group=request.POST.get('playbook_auth_group', 0),
+                playbook_auth_user=request.POST.get('playbook_auth_user', 0),
+            )
+        except Exception, e:
+            return render(
+                request,
+                'apps/apps_playbook_modf.html',
+                {
+                    "user": request.user,
+                    "errorInfo": "剧本添加错误：%s" % str(e)
+                },
+            )
+        if sList:
+            tagret_server_list = [s.playbook_server for s in numberList]
+            postServerList = []
+            for sip in sList:
+                try:
+                    postServerList.append(sip)
+                    if sip not in tagret_server_list:
+                        Ansible_Playbook_Number.objects.create(
+                            playbook=playbook,
+                            playbook_server=sip
+                        )
+                except Exception, e:
+                    print e
+                    return render(
+                        request,
+                        'apps/apps_playbook_modf.html',
+                        {
+                            "user": request.user,
+                            "errorInfo": "目标服务器信息修改错误：%s" % str(e)
+                        },
+                    )
+            # 清除目标主机
+            delList = list(set(tagret_server_list).difference(set(postServerList)))
+            for ip in delList:
+                Ansible_Playbook_Number.objects.filter(playbook=playbook, playbook_server=ip).delete()
+        else:
+            for server in numberList:
+                Ansible_Playbook_Number.objects.filter(playbook=playbook, playbook_server=server.playbook_server).delete()
+        AnsibleRecord.PlayBook.insert(
+            user=str(request.user),
+            ans_id=playbook.id,
+            ans_name=playbook.playbook_name,
+            ans_content="修改Ansible剧本",
+            ans_server=','.join(sList)
+        )
+        return HttpResponseRedirect('/apps/playbook/modf/{id}/'.format(id=pid))
