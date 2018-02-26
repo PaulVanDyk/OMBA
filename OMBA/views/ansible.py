@@ -827,3 +827,274 @@ def apps_playbook_online_modf(request, pid):
                 'data': []
             }
         )
+
+
+@login_required(login_url='/login')
+def ansible_log(request):
+    if request.method == "GET":
+        modelList = Log_Ansible_Model.objects.all().order_by('-id')[0:120]
+        playbookList = Log_Ansible_Playbook.objects.all().order_by('-id')[0:120]
+        return render(
+            request,
+            'apps/apps_log.html',
+            {
+                "user": request.user,
+                "modelList": modelList,
+                "playbookList": playbookList
+            },
+        )
+
+
+@login_required(login_url='/login')
+def ansible_log_view(request, model, id):
+    if request.method == "POST":
+        if model == 'model':
+            try:
+                result = ''
+                logId = Log_Ansible_Model.objects.get(id=id)
+                for ds in Ansible_CallBack_Model_Result.objects.filter(logId=logId):
+                    result += ds.content
+                    result += '\n'
+            except Exception, e:
+                return JsonResponse(
+                    {
+                        'msg': "查看失败",
+                        "code": 500,
+                        'data': e
+                    }
+                )
+        elif model == 'playbook':
+            try:
+                result = ''
+                logId = Log_Ansible_Playbook.objects.get(id=id)
+                for ds in Ansible_CallBack_PlayBook_Result.objects.filter(logId=logId):
+                    result += ds.content
+                    result += '\n'
+            except Exception, e:
+                return JsonResponse(
+                    {
+                        'msg': "查看失败",
+                        "code": 500,
+                        'data': e
+                    }
+                )
+        return JsonResponse(
+            {
+                'msg': "操作成功",
+                "code": 200,
+                'data': result
+            }
+        )
+
+
+@login_required()
+@permission_required('OpsManage.can_read_ansible_script', login_url='/noperm/')
+def apps_script_online(request):
+    if request.method == "GET":
+        serverList = Server_Assets.objects.all()
+        groupList = Group.objects.all()
+        serviceList = Service_Assets.objects.all()
+        projectList = Project_Assets.objects.all()
+        return render(
+            request,
+            'apps/apps_script_online.html',
+            {
+                "user": request.user,
+                "ans_uuid": uuid.uuid4(),
+                "serverList": serverList,
+                "groupList": groupList,
+                "serviceList": serviceList,
+                "projectList": projectList
+            }
+        )
+    elif request.method == "POST" and request.user.has_perm('OpsManage.can_exec_ansible_script'):
+        resource = []
+        sList = []
+
+        def saveScript(content, filePath):
+            if os.path.isdir(os.path.dirname(filePath)) is not True:
+                os.makedirs(os.path.dirname(filePath))  # 判断文件存放的目录是否存在，不存在就创建
+            with open(filePath, 'w') as f:
+                f.write(content)
+            return filePath
+
+        if request.POST.get('server_model') in ['service', 'group', 'custom']:
+            if request.POST.get('server_model') == 'custom':
+                serverList = request.POST.getlist('ansible_server[]')
+                for server in serverList:
+                    server_assets = Server_Assets.objects.get(id=server)
+                    sList.append(server_assets.ip)
+                    if server_assets.keyfile == 1:
+                        resource.append(
+                            {
+                                "hostname": server_assets.ip,
+                                "port": int(server_assets.port),
+                                "username": server_assets.username
+                            }
+                        )
+                    else:
+                        resource.append(
+                            {
+                                "hostname": server_assets.ip,
+                                "port": int(server_assets.port),
+                                "username": server_assets.username,
+                                "password": server_assets.passwd
+                            }
+                        )
+            elif request.POST.get('server_model') == 'group':
+                try:
+                    serverList = Assets.objects.filter(group=request.POST.get('ansible_group', 0))
+                except:
+                    serverList = []
+                for server in serverList:
+                    try:
+                        sList.append(server.server_assets.ip)
+                    except Exception, ex:
+                        print ex
+                        continue
+                    if server.server_assets.keyfile == 1:
+                        resource.append(
+                            {
+                                "hostname": server.server_assets.ip,
+                                "port": int(server.server_assets.port),
+                                "username": server.server_assets.username
+                            }
+                        )
+                    else:
+                        resource.append(
+                            {
+                                "hostname": server.server_assets.ip,
+                                "port": int(server.server_assets.port),
+                                "username": server.server_assets.username,
+                                "password": server.server_assets.passwd
+                            }
+                        )
+            elif request.POST.get('server_model') == 'service':
+                try:
+                    serverList = Assets.objects.filter(business=int(request.POST.get('ansible_service', 0)))
+                except:
+                    serverList = []
+                for server in serverList:
+                    try:
+                        sList.append(server.server_assets.ip)
+                    except Exception, ex:
+                        print ex
+                        continue
+                    if server.server_assets.keyfile == 1:
+                        resource.append(
+                            {
+                                "hostname": server.server_assets.ip,
+                                "port": int(server.server_assets.port),
+                                "username": server.server_assets.username
+                            }
+                        )
+                    else:
+                        resource.append(
+                            {
+                                "hostname": server.server_assets.ip,
+                                "port": int(server.server_assets.port),
+                                "username": server.server_assets.username,
+                                "password": server.server_assets.passwd
+                            }
+                        )
+
+            if len(sList) > 0 and request.POST.get('type') == 'run' and request.POST.get('script_file'):
+                filePath = saveScript(
+                    content=request.POST.get('script_file'),
+                    filePath='/tmp/script-{ram}'.format(ram=uuid.uuid4().hex[0:8])
+                )
+                redisKey = request.POST.get('ans_uuid')
+                logId = AnsibleRecord.Model.insert(
+                    user=str(request.user),
+                    ans_model='script',
+                    ans_server=','.join(sList),
+                    ans_args=filePath
+                )
+                DsRedis.OpsAnsibleModel.delete(redisKey)
+                DsRedis.OpsAnsibleModel.lpush(
+                    redisKey,
+                    "[Start] Ansible Model: {model} Script:{args}".format(model='script', args=filePath)
+                )
+                if request.POST.get('ansible_debug') == 'on':
+                    ANS = ANSRunner(
+                        resource,
+                        redisKey,
+                        logId,
+                        verbosity=4
+                    )
+                else:
+                    ANS = ANSRunner(
+                        resource,
+                        redisKey,
+                        logId
+                    )
+                ANS.run_model(
+                    host_list=sList,
+                    module_name='script',
+                    module_args=filePath
+                )
+                DsRedis.OpsAnsibleModel.lpush(redisKey, "[Done] Ansible Done.")
+                try:
+                    os.remove(filePath)
+                except Exception, ex:
+                    print ex
+                return JsonResponse(
+                    {
+                        'msg': "操作成功",
+                        "code": 200,
+                        'data': []
+                    }
+                )
+            elif request.POST.get('type') == 'save' and request.POST.get('script_file'):
+                fileName = '/upload/scripts/script-{ram}'.format(ram=uuid.uuid4().hex[0:8])
+                filePath = os.getcwd() + fileName
+                saveScript(content=request.POST.get('script_file'), filePath=filePath)
+                try:
+                    service = int(request.POST.get('ansible_service'))
+                except:
+                    service = None
+                try:
+                    group = int(request.POST.get('ansible_group'))
+                except:
+                    group = None
+                try:
+                    Ansible_Script.objects.create(
+                        script_name=request.POST.get('script_name'),
+                        script_uuid=request.POST.get('ans_uuid'),
+                        script_server=json.dumps(sList),
+                        script_group=group,
+                        script_file=fileName,
+                        script_service=service,
+                        script_type=request.POST.get('server_model')
+                    )
+                except Exception, ex:
+                    print ex
+                    return JsonResponse(
+                        {
+                            'msg': str(ex),
+                            "code": 500,
+                            'data': []
+                        }
+                    )
+                return JsonResponse(
+                    {
+                        'msg': "保存成功",
+                        "code": 200,
+                        'data': []
+                    }
+                )
+            else:
+                return JsonResponse(
+                    {
+                        'msg': "操作失败，未选择主机或者脚本内容为空,或者所选分组该没有成员",
+                        "code": 500,
+                        'data': []
+                    }
+                )
+        else:
+            return JsonResponse(
+                {
+                    'msg': "操作失败，不支持的操作类型",
+                    "code": 500, 'data': []
+                }
+            )
