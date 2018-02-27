@@ -1098,3 +1098,69 @@ def apps_script_online(request):
                     "code": 500, 'data': []
                 }
             )
+
+
+@login_required()
+@permission_required('OpsManage.can_read_ansible_script', login_url='/noperm/')
+def apps_script_list(request):
+    if request.method == "GET":
+        scriptList = Ansible_Script.objects.all()
+        gList = []
+        for group in User.objects.get(username=request.user).groups.values():
+            gList.append(group.get('id'))
+        for ds in scriptList:
+            # 如果用户是超级管理员，设置runid等于项目id
+            if request.user.is_superuser:
+                ds.runid = ds.id
+            # 如果用户在授权组或者是授权用户，设置runid等于项目id
+            elif ds.script_group in gList:
+                ds.runid = ds.id
+            # 如果剧本没有授权默认所有用户都可以使用
+            elif ds.script_group == 0:
+                ds.runid = ds.id
+            ds.script_server = json.loads(ds.script_server)
+        return render(
+            request,
+            'apps/apps_script_list.html',
+            {
+                "user": request.user,
+                "scriptList": scriptList
+            }
+        )
+
+
+@login_required()
+@permission_required('OpsManage.can_read_ansible_script', login_url='/noperm/')
+def apps_script_file(request, pid):
+    try:
+        script = Ansible_Script.objects.get(id=pid)
+    except:
+        return JsonResponse(
+            {
+                'msg': "脚本不存在，可能已经被删除.",
+                "code": 200,
+                'data': []
+            }
+        )
+    if request.method == "POST":
+        script_file = os.getcwd() + str(script.script_file)
+        if os.path.exists(script_file):
+            content = ''
+            with open(script_file, "r") as f:
+                for line in f.readlines():
+                    content = content + line
+            return JsonResponse(
+                {
+                    'msg': "脚本获取成功",
+                    "code": 200,
+                    'data': content
+                }
+            )
+        else:
+            return JsonResponse(
+                {
+                    'msg': "脚本不存在，可能已经被删除.",
+                    "code": 500,
+                    'data': []
+                }
+            )
