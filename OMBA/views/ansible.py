@@ -1164,3 +1164,169 @@ def apps_script_file(request, pid):
                     'data': []
                 }
             )
+
+
+@login_required()
+@permission_required('OpsManage.can_read_ansible_script', login_url='/noperm/')
+def apps_script_online_run(request, pid):
+    try:
+        script = Ansible_Script.objects.get(id=pid)
+        numberList = json.loads(script.script_server)
+    except:
+        return render(
+            request,
+            'apps/apps_script_modf.html',
+            {
+                "user": request.user,
+                "errorInfo": "剧本不存在，可能已经被删除."
+            },
+        )
+
+    def saveScript(content, filePath):
+        if os.path.isdir(os.path.dirname(filePath)) is not True:
+            os.makedirs(os.path.dirname(filePath))  # 判断文件存放的目录是否存在，不存在就创建
+        with open(filePath, 'w') as f:
+            f.write(content)
+        return filePath
+    if request.method == "GET":
+        projectList = Project_Assets.objects.all()
+        serverList = Server_Assets.objects.all()
+        for ds in serverList:
+            if ds.ip in numberList:
+                ds.count = 1
+            else:
+                ds.count = 0
+        script_file = os.getcwd() + '/' + str(script.script_file)
+        if os.path.exists(script_file):
+            content = ''
+            with open(script_file, "r") as f:
+                for line in f.readlines():
+                    content = content + line
+            script.script_contents = content
+        groupList = Group.objects.all()
+        userList = User.objects.all()
+        serviceList = []
+        try:
+            project = Service_Assets.objects.get(id=script.script_service).project
+            serviceList = Service_Assets.objects.filter(project=project)
+        except:
+            project = None
+        return render(
+            request,
+            'apps/apps_script_modf.html',
+            {
+                "user": request.user,
+                "userList": userList,
+                "script": script,
+                "serverList": serverList,
+                "groupList": groupList,
+                "serviceList": serviceList,
+                "project": project,
+                "projectList": projectList
+            },
+        )
+    elif request.method == "POST"and request.user.has_perm('OpsManage.can_exec_ansible_script'):
+        resource = []
+        sList = []
+        if request.POST.get('server_model') in ['service', 'group', 'custom']:
+            if request.POST.get('server_model') == 'custom':
+                serverList = request.POST.getlist('ansible_server[]')
+                for server in serverList:
+                    server_assets = Server_Assets.objects.get(id=server)
+                    sList.append(server_assets.ip)
+                    if server_assets.keyfile == 1:
+                        resource.append(
+                            {
+                                "hostname": server_assets.ip,
+                                "port": int(server_assets.port),
+                                "username": server_assets.username
+                            }
+                        )
+                    else:
+                        resource.append(
+                            {
+                                "hostname": server_assets.ip,
+                                "port": int(server_assets.port),
+                                "username": server_assets.username,
+                                "password": server_assets.passwd
+                            }
+                        )
+            elif request.POST.get('server_model') == 'group':
+                serverList = Assets.objects.filter(group=request.POST.get('ansible_group'))
+                for server in serverList:
+                    sList.append(server.server_assets.ip)
+                    if server.server_assets.keyfile == 1:
+                        resource.append(
+                            {
+                                "hostname": server.server_assets.ip,
+                                "port": int(server.server_assets.port),
+                                "username": server.server_assets.username
+                            }
+                        )
+                    else:
+                        resource.append(
+                            {
+                                "hostname": server.server_assets.ip,
+                                "port": int(server.server_assets.port),
+                                "username": server.server_assets.username,
+                                "password": server.server_assets.passwd
+                            }
+                        )
+            elif request.POST.get('server_model') == 'service':
+                serverList = Assets.objects.filter(business=request.POST.get('ansible_service'))
+                for server in serverList:
+                    try:
+                        sList.append(server.server_assets.ip)
+                    except Exception, ex:
+                        print ex
+                        continue
+                    if server.server_assets.keyfile == 1:
+                        resource.append(
+                            {
+                                "hostname": server.server_assets.ip,
+                                "port": int(server.server_assets.port),
+                                "username": server.server_assets.username
+                            }
+                        )
+                    else:
+                        resource.append(
+                            {
+                                "hostname": server.server_assets.ip,
+                                "port": int(server.server_assets.port),
+                                "username": server.server_assets.username,
+                                "password": server.server_assets.passwd
+                            }
+                        )
+            if request.POST.get('type') == 'save' and request.POST.get('script_file'):
+                filePath = os.getcwd() + '/' + str(script.script_file)
+                saveScript(content=request.POST.get('script_file'), filePath=filePath)
+                try:
+                    Ansible_Script.objects.filter(id=pid).update(
+                        script_server=json.dumps(sList),
+                        script_group=request.POST.get('ansible_group'),
+                        script_service=request.POST.get('ansible_service'),
+                        script_type=request.POST.get('server_model')
+                    )
+                except Exception, ex:
+                    return JsonResponse(
+                        {
+                            'msg': str(ex),
+                            "code": 500,
+                            'data': []
+                        }
+                    )
+                return JsonResponse(
+                    {
+                        'msg': "保存成功",
+                        "code": 200,
+                        'data': []
+                    }
+                )
+        else:
+            return JsonResponse(
+                {
+                    'msg': "操作失败，不支持的操作类型，或者您没有权限执行",
+                    "code": 500,
+                    'data': []
+                }
+            )
