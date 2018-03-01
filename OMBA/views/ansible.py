@@ -182,7 +182,7 @@ def ansible_run(request):
 
 @login_required()
 @permission_required('OMBA.can_add_ansible_playbook', login_url='/noperm/')
-def app_upload(request):
+def apps_upload(request):
     if request.method == "GET":
         serverList = Server_Assets.objects.all()
         projectList = Project_Assets.objects.all()

@@ -15,7 +15,25 @@ Including another URLconf
 """
 from django.conf.urls import url
 from django.contrib import admin
+from OMBA.views import (
+    ansible
+)
 
 urlpatterns = [
     url(r'^admin/', admin.site.urls),
+    url(r'^apps/$', ansible.apps_list),
+    url(r'^apps/model/$', ansible.apps_model),
+    url(r'^apps/script/online/$', ansible.apps_script_online),
+    url(r'^apps/script/list/$', ansible.apps_script_list),
+    url(r'^apps/script/file/(?P<pid>[0-9]+)/$', ansible.apps_script_file),
+    url(r'^apps/script/run/(?P<pid>[0-9]+)/$', ansible.apps_script_online_run),
+    url('r^apps/run/$', ansible.ansible_run),
+    url('r^apps/log/$', ansible.ansible_log),
+    url('^apps/log/(?P<model>[a-z]+)/(?P<pid>[0-9]+)/$', ansible.ansible_log_view),
+    url('^apps/playbook/upload/$', ansible.apps_upload),
+    url('^apps/playbook/online/$', ansible.apps_online),
+    url('^apps/playbook/file/(?P<pid>[0-9]+)/$', ansible.apps_playbook_file),
+    url('^apps/playbook/run/(?P<pid>[0-9]+)/$', ansible.apps_playbook_run),
+    url('^apps/playbook/modf/(?P<pid>[0-9]+)/$', ansible.apps_playbook_modf),
+    url('^apps/playbook/online/modf/(?P<pid>[0-9]+)/$', ansible.apps_playbook_online_modf),
 ]
