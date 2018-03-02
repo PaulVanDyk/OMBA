@@ -18,6 +18,9 @@ from django.contrib import admin
 from OMBA.views import (
     ansible
 )
+from OMBA.restfull import (
+    ansible_api
+)
 
 urlpatterns = [
     url(r'^admin/', admin.site.urls),
@@ -36,4 +39,8 @@ urlpatterns = [
     url(r'^apps/playbook/run/(?P<pid>[0-9]+)/$', ansible.apps_playbook_run),
     url(r'^apps/playbook/modf/(?P<pid>[0-9]+)/$', ansible.apps_playbook_modf),
     url(r'^apps/playbook/online/modf/(?P<pid>[0-9]+)/$', ansible.apps_playbook_online_modf),
+    url(r'^api/playbook/$', ansible_api.playbook_list),
+    url(r'^api/playbook/(?P<id>[0-9]+)/$', ansible_api.playbook_detail),
+    url(r'^api/logs/ansible/model/(?P<id>[0-9]+)/$', ansible_api.modelLogsdetail),
+    url(r'^api/logs/ansible/playbook/(?P<id>[0-9]+)/$', ansible_api.playbookLogsdetail),
 ]

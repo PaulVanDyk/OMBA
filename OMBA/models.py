@@ -1009,7 +1009,7 @@ class Log_Cron_Config(models.Model):
         verbose_name_plural = '任务配置操作记录表'
 
 
-class Log_Ansible_Model(models.Model): 
+class Log_Ansible_Model(models.Model):
     ans_user = models.CharField(
         max_length=50,
         verbose_name='使用用户',
@@ -1208,6 +1208,12 @@ class Log_Ansible_Playbook(models.Model):
 
     class Meta:
         db_table = 'omba_log_ansible_playbook'
+        permissions = (
+            ("can_read_log_ansible_playbook", "读取Ansible剧本执行记录权限"),
+            ("can_change_log_ansible_playbook", "更改Ansible剧本执行记录权限"),
+            ("can_add_log_ansible_playbook", "添加Ansible剧本执行记录权限"),
+            ("can_delete_log_ansible_playbook", "删除Ansible剧本执行记录权限"),
+        )
         verbose_name = 'Ansible剧本操作记录表'  
         verbose_name_plural = 'Ansible剧本操作记录表' 
 

@@ -202,7 +202,7 @@ class DeployLogsSerializer(serializers.ModelSerializer):
         )
 
 
-class AnbiblePlaybookSerializer(serializers.ModelSerializer): 
+class AnsiblePlaybookSerializer(serializers.ModelSerializer):
     server_number = serializers.StringRelatedField(
         many=True
     )
