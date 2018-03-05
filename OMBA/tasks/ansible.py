@@ -65,3 +65,61 @@ def AnsibleScripts(**kw):
     except Exception, e:
         print e
         return False
+
+
+@task
+def AnsiblePlayBook(**kw):
+    logId = None
+    resource = []
+    try:
+        if kw.has_key('playbook_id'):
+            playbook = Ansible_Playbook.objects.get(id=kw.get('playbook_id'))
+            filePath = os.getcwd() + str(playbook.playbook_file)
+            if kw.has_key('hosts'):
+                try:
+                    sList = list(kw.get('hosts'))
+                except Exception, ex:
+                    return ex
+            else:
+                try:
+                    numberList = Ansible_Playbook_Number.objects.filter(playbook=playbook)
+                    if numberList:
+                        sList = [s.plabook_server for s in numberList]
+                except Exception, ex:
+                    return ex
+            if kw.has_key('logs'):
+                logId = AnsibleRecord.PlayBook.insert(
+                    user='celery',
+                    ans_id=playbook.id,
+                    ans_name=playbook.playbook_name,
+                    ans_content=u"执行Ansible剧本",
+                    ans_server=','.join(sList)
+                )
+            for sip in sList:
+                try:
+                    server_assets = Server_Assets.objects.get(ip=sip)
+                except Exception, ex:
+                    continue
+                if server_assets.keyfile == 1:
+                    resource.append(
+                        {
+                            "hostname": server_assets.ip,
+                            "port": int(server_assets.port),
+                            "username": server_assets.username
+                        }
+                    )
+                else:
+                    resource.append(
+                        {
+                            "hostname": server_assets.ip,
+                            "port": int(server_assets.port),
+                            "username": server_assets.username,
+                            "password": server_assets.passwd
+                        }
+                    )
+            ANS = ANSRunner(resource, redisKey=None, logId=logId)
+            ANS.run_playbook(host_list=sList, playbook_path=filePath)
+            return ANS.get_playbook_result()
+    except Exception, e:
+        print e
+        return False
