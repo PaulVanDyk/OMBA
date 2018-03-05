@@ -219,3 +219,109 @@ def task_model(request):
             }
         )
 
+
+@login_required
+@permission_required('djcelery.read_periodictask', login_url='/noperm/')
+def task_view(request):
+    if request.method == "GET":
+        try:
+            workList = WorkerState.objects.all()
+            regTaskList = []
+            for task in list(keys(cTasks)):
+                if task.startswith('OpsManage.tasks.ansible') or task.startswith('OpsManage.tasks.sched'):
+                    regTaskList.append(task)
+        except Exception, ex:
+            print ex
+            taskLog = []
+        return render(
+            request,
+            'task/task_view.html',
+            {
+                "user": request.user,
+                "regTaskList": regTaskList,
+                "workList": workList
+            },
+        )
+    elif request.method == "POST":
+        op = request.POST.get('op')
+        if op in ['view', 'delete'] and request.user.has_perm('djcelery.change_taskstate'):
+            try:
+                task = {}
+                for ds in PeriodicTask.objects.all():
+                    task[ds.task] = ds.name
+                taskLog = TaskState.objects.get(id=request.POST.get('id'))
+            except:
+                return JsonResponse(
+                    {
+                        "code": 500,
+                        "data": None,
+                        "msg": "任务不存在"
+                    }
+                )
+            if op == 'view':
+                try:
+                    data = dict()
+                    work = WorkerState.objects.get(id=taskLog.worker_id)
+                    data['id'] = taskLog.id
+                    data['task_id'] = taskLog.task_id
+                    data['worker'] = work.hostname
+                    if task.has_key(taskLog.name):
+                        data['name'] = task[taskLog.name]
+                    else:
+                        data['name'] = taskLog.name
+                    data['tstamp'] = taskLog.tstamp
+                    data['args'] = taskLog.args.replace('[u', '[')
+                    data['kwargs'] = taskLog.kwargs.replace('u\'', '\'')
+                    data['result'] = taskLog.result
+                    data['state'] = taskLog.state
+                    data['runtime'] = taskLog.runtime
+                    return JsonResponse(
+                        {
+                            "code": 200,
+                            "data": data,
+                            "msg": "操作成功"
+                        }
+                    )
+                except Exception, e:
+                    return JsonResponse(
+                        {
+                            "code": 500,
+                            "data": None,
+                            "msg": "日志查看失败。"
+                        }
+                    )
+            elif op == 'delete':
+                try:
+                    taskLog.delete()
+                    return JsonResponse(
+                        {
+                            "code": 200,
+                            "data": None,
+                            "msg": "删除成功"
+                        }
+                    )
+                except:
+                    return JsonResponse(
+                        {
+                            "code": 500,
+                            "data": None,
+                            "msg": "日志删除失败"
+                        }
+                    )
+        else:
+            return JsonResponse(
+                {
+                    "code": 500,
+                    "data": None,
+                    "msg": "不支持的操作或者您没有权限操作操作此项。"
+                }
+            )
+    else:
+        return JsonResponse(
+            {
+                "code": 500,
+                "data": None,
+                "msg": "不支持的HTTP操作"
+            }
+        )
+
