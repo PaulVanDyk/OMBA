@@ -5,7 +5,7 @@ from django.shortcuts import render
 from djcelery.models import PeriodicTask, CrontabSchedule, WorkerState, TaskState, IntervalSchedule
 from django.contrib.auth.decorators import login_required
 from celery.registry import tasks as cTasks
-from celery.five import keys, items
+from celery.five import keys
 from django.contrib.auth.decorators import permission_required
 
 
@@ -325,3 +325,58 @@ def task_view(request):
             }
         )
 
+@login_required
+@permission_required('djcelery.read_periodictask', login_url='/noperm/')
+def task_search(request):
+    if request.method == "POST":
+        dataList = []
+        data = dict()
+        #格式化查询条件
+        for (k, v) in request.POST.items():
+            if v is not None and v != u'':
+                data[k] = v
+        try:
+            runtime = request.POST.get('runtime').split('-')
+            data.pop('runtime')
+            data['runtime__gte'] = int(runtime[0])
+            data['runtime__lte'] = int(runtime[1])
+        except:
+            pass
+        for ds in TaskState.objects.filter(**data).order_by("-id")[0:1000]:
+            taskId = '''<td >{task_id}</td>'''.format(task_id=ds.task_id)
+            taskName = '''<td >{task_name}</td>'''.format(task_name=ds.name)
+            taskArgs = '''<td >{task_kwargs}</td>'''.format(task_kwargs=ds.kwargs.replace('u\'', '\''))
+            taskTstamp = '''<td >{task_tstamp}</td>'''.format(task_tstamp=ds.tstamp)
+            taskRuntime = '''<td >{task_runtime}</td>'''.format(task_runtime=ds.runtime)
+            taskState = '''<td >{task_state}</td>'''.format(task_state=ds.state)
+            taskOp = '''
+                <td class="text-center">
+                    <div>
+                        <a data-toggle="modal" data-target="#myViewLogModal" href="javascript:" onclick="onBtnViewTaskLog(this, {id}, '{task_id}', 'view')">
+                            <i class="fa fa-search-plus"></i>
+                        </a>
+                        <a href="javascript:" onclick="onBtnHandleTaskLog(this, {id}, '{task_id}', 'delete')">
+                            <i class="fa fa-trash-o"></i>
+                        </a>
+                    </div>
+                </td>
+            '''.format(id=ds.id, task_id=ds.task_id)
+            dataList.append(
+                [
+                    taskId,
+                    taskName,
+                    taskArgs,
+                    taskTstamp,
+                    taskRuntime,
+                    taskState,
+                    taskOp
+                ]
+            )
+        return JsonResponse(
+            {
+                'msg': "数据查询成功",
+                "code": 200,
+                'data': dataList,
+                'count': 0
+            }
+        )
