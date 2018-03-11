@@ -106,7 +106,7 @@ def assets_list(request):
 
 
 @login_required(login_url='/login')
-@permission_required('OpsManage.can_read_assets', login_url='/noperm/')
+@permission_required('OMBA.can_read_assets', login_url='/noperm/')
 def assets_view(request, aid):
     try:
         assets = Assets.objects.get(id=aid)
@@ -174,4 +174,352 @@ def assets_view(request, aid):
                 "baseAssets": getBaseAssets(),
                 'userList': userList
             },
+        )
+
+
+@login_required(login_url='/login')
+@permission_required('OMBA.can_change_assets', login_url='/noperm/')
+def assets_modf(request, aid):
+    try:
+        assets = Assets.objects.get(id=aid)
+        userList = User.objects.all()
+    except:
+        return render(
+            request,
+            'assets/assets_modf.html',
+            {"user": request.user},
+        )
+    if assets.assets_type in ['server', 'vmser']:
+        try:
+            asset_ram = assets.ram_assets_set.all()
+        except:
+            asset_ram = []
+        try:
+            asset_disk = assets.disk_assets_set.all()
+        except:
+            asset_disk = []
+        try:
+            asset_body = assets.server_assets
+        except Exception, ex:
+            logger.error(msg="修改资产失败: {ex}".format(ex=str(ex)))
+            return render(
+                request,
+                '404.html',
+                {"user": request.user},
+            )
+        return render(
+            request,
+            'assets/assets_modf.html',
+            {
+                "user": request.user,
+                "asset_type": assets.assets_type,
+                "asset_main": assets,
+                "asset_body": asset_body,
+                "asset_ram": asset_ram,
+                "asset_disk": asset_disk,
+                "assets_data": getBaseAssets(),
+                'userList': userList
+            },
+        )
+    else:
+        try:
+            asset_body = assets.network_assets
+        except:
+            return render(
+                request,
+                'assets/assets_modf.html',
+                {"user": request.user},
+            )
+        return render(
+            request,
+            'assets/assets_modf.html',
+            {
+                "user": request.user,
+                "asset_type": assets.assets_type,
+                "asset_main": assets,
+                "asset_body": asset_body,
+                "assets_data": getBaseAssets(),
+                'userList': userList
+            },
+        )
+
+
+@login_required(login_url='/login')
+@permission_required('OMBA.can_change_server_assets', login_url='/noperm/')
+def assets_facts(request, args=None):
+    if request.method == "POST" and request.user.has_perm('OMBA.change_server_assets'):
+        server_id = request.POST.get('server_id')
+        genre = request.POST.get('type')
+        if genre == 'setup':
+            try:
+                server_assets = Server_Assets.objects.get(id=request.POST.get('server_id'))
+                if server_assets.keyfile == 1:
+                    resource = [
+                        {
+                            "hostname": server_assets.ip,
+                            "port": int(server_assets.port),
+                            "username": server_assets.username
+                        }
+                    ]
+                else:
+                    resource = [
+                        {
+                            "hostname": server_assets.ip,
+                            "port": server_assets.port,
+                            "username": server_assets.username,
+                            "password": server_assets.passwd
+                        }
+                    ]
+            except Exception, ex:
+                logger.error(msg="更新资产失败: {ex}".format(ex=str(ex)))
+                return JsonResponse(
+                    {
+                        'msg': "数据更新失败-查询不到该主机资料",
+                        "code": 502
+                    }
+                )
+            ANS = ANSRunner(resource)
+            ANS.run_model(
+                host_list=[server_assets.ip],
+                module_name='setup',
+                module_args=""
+            )
+            data = ANS.handle_cmdb_data(ANS.get_model_result())
+            if data:
+                for ds in data:
+                    status = ds.get('status')
+                    if status == 0:
+                        try:
+                            assets = Assets.objects.get(id=server_assets.assets_id)
+                            Assets.objects.filter(id=server_assets.assets_id).update(
+                                sn=ds.get('serial'),
+                                model=ds.get('model'),
+                                manufacturer=ds.get('manufacturer')
+                            )
+                        except Exception, ex:
+                            logger.error(msg="获取服务器信息失败: {ex}".format(ex=str(ex)))
+                            return JsonResponse(
+                                {
+                                    'msg': "数据更新失败-查询不到该主机的资产信息",
+                                    "code": 403
+                                }
+                            )
+                        try:
+                            Server_Assets.objects.filter(id=server_id).update(
+                                cpu_number=ds.get('cpu_number'),
+                                kernel=ds.get('kernel'),
+                                selinux=ds.get('selinux'),
+                                hostname=ds.get('hostname'),
+                                system=ds.get('system'),
+                                cpu=ds.get('cpu'),
+                                disk_total=ds.get('disk_total'),
+                                cpu_core=ds.get('cpu_core'),
+                                swap=ds.get('swap'),
+                                ram_total=ds.get('ram_total'),
+                                vcpu_number=ds.get('vcpu_number')
+                            )
+                            recordAssets.delay(
+                                user=str(request.user),
+                                content="修改服务器资产：{ip}".format(ip=server_assets.ip),
+                                type="server",
+                                id=server_assets.id
+                            )
+                        except Exception, ex:
+                            logger.error(msg="更新服务器信息失败: {ex}".format(ex=str(ex)))
+                            return JsonResponse(
+                                {
+                                    'msg': "数据更新失败-写入数据失败",
+                                    "code": 400
+                                }
+                            )
+                        for nk in ds.get('nks'):
+                            macaddress = nk.get('macaddress')
+                            count = NetworkCard_Assets.objects.filter(assets=assets, macaddress=macaddress).count()
+                            if count > 0:
+                                try:
+                                    NetworkCard_Assets.objects.filter(assets=assets, macaddress=macaddress).update(
+                                        assets=assets,
+                                        device=nk.get('device'),
+                                        ip=nk.get('address'),
+                                        module=nk.get('module'),
+                                        mtu=nk.get('mtu'),
+                                        active=nk.get('active')
+                                    )
+                                except Exception, ex:
+                                    logger.warn(msg="更新服务器网卡信息失败: {ex}".format(ex=str(ex)))
+                            else:
+                                try:
+                                    NetworkCard_Assets.objects.create(
+                                        assets=assets,
+                                        device=nk.get('device'),
+                                        macaddress=nk.get('macaddress'),
+                                        ip=nk.get('address'),
+                                        module=nk.get('module'),
+                                        mtu=nk.get('mtu'),
+                                        active=nk.get('active')
+                                    )
+                                except Exception, ex:
+                                    logger.warn(msg="写入服务器网卡信息失败: {ex}".format(ex=str(ex)))
+
+                    else:
+                        return JsonResponse(
+                            {
+                                'msg': "数据更新失败-无法链接主机",
+                                "code": 502
+                            }
+                        )
+                return JsonResponse(
+                    {
+                        'msg': "数据更新成功",
+                        "code": 200
+                    }
+                )
+            else:
+                return JsonResponse(
+                    {
+                        'msg': "数据更新失败-请检查Ansible配置",
+                        "code": 400
+                    }
+                )
+
+        elif genre == 'crawHw':
+            try:
+                server_assets = Server_Assets.objects.get(id=server_id)
+                assets = Assets.objects.get(id=server_assets.assets_id)
+                if server_assets.keyfile == 1:
+                    resource = [
+                        {
+                            "hostname": server_assets.ip,
+                            "port": int(server_assets.port),
+                            "username": server_assets.username
+                        }
+                    ]
+                else:
+                    resource = [
+                        {
+                            "hostname": server_assets.ip,
+                            "port": server_assets.port,
+                            "username": server_assets.username,
+                            "password": server_assets.passwd
+                        }
+                    ]
+            except Exception, ex:
+                logger.error(msg="更新硬件信息失败: {ex}".format(ex=ex))
+                return JsonResponse(
+                    {
+                        'msg': "数据更新失败-查询不到该主机资料",
+                        "code": 502
+                    }
+                )
+            ANS = ANSRunner(resource)
+            ANS.run_model(
+                host_list=[server_assets.ip],
+                module_name='crawHw',
+                module_args=""
+            )
+            data = ANS.handle_cmdb_crawHw_data(ANS.get_model_result())
+            if data:
+                for ds in data:
+                    if ds.get('mem_info'):
+                        for mem in ds.get('mem_info'):
+                            if Ram_Assets.objects.filter(assets=assets, device_slot=mem.get('slot')).count() > 0:
+                                try:
+                                    Ram_Assets.objects.filter(assets=assets, device_slot=mem.get('slot')).update(
+                                        device_slot=mem.get('slot'),
+                                        device_model=mem.get('serial'),
+                                        device_brand=mem.get('manufacturer'),
+                                        device_volume=mem.get('size'),
+                                        device_status="Online"
+                                    )
+                                except Exception, ex:
+                                    return JsonResponse(
+                                        {
+                                            'msg': "数据更新失败-写入数据失败",
+                                            "code": 400
+                                        }
+                                    )
+                            else:
+                                try:
+                                    Ram_Assets.objects.create(
+                                        device_slot=mem.get('slot'),
+                                        device_model=mem.get('serial'),
+                                        device_brand=mem.get('manufacturer'),
+                                        device_volume=mem.get('size'),
+                                        device_status="Online",
+                                        assets=assets
+                                    )
+                                    recordAssets.delay(
+                                        user=str(request.user),
+                                        content="修改服务器资产：{ip}".format(ip=server_assets.ip),
+                                        type="server",
+                                        id=server_assets.id
+                                    )
+                                except Exception, e:
+                                    return JsonResponse(
+                                        {
+                                            'msg': "数据更新失败-写入数据失败",
+                                            "code": 400
+                                        }
+                                    )
+                    if ds.get('disk_info'):
+                        for disk in ds.get('disk_info'):
+                            if Disk_Assets.objects.filter(assets=assets, device_slot=disk.get('slot')).count() > 0:
+                                try:
+                                    Disk_Assets.objects.filter(assets=assets, device_slot=disk.get('slot')).update(
+                                        device_serial=disk.get('serial'),
+                                        device_model=disk.get('model'),
+                                        device_brand=disk.get('manufacturer'),
+                                        device_volume=disk.get('size'),
+                                        device_status="Online"
+                                    )
+                                except Exception, e:
+                                    return JsonResponse(
+                                        {
+                                            'msg': "数据更新失败-写入数据失败",
+                                            "code": 400
+                                        }
+                                    )
+                            else:
+                                try:
+                                    Disk_Assets.objects.create(
+                                        device_serial=disk.get('serial'),
+                                        device_model=disk.get('model'),
+                                        device_brand=disk.get('manufacturer'),
+                                        device_volume=disk.get('size'),
+                                        device_status="Online",
+                                        assets=assets,
+                                        device_slot=disk.get('slot')
+                                    )
+                                    recordAssets.delay(
+                                        user=str(request.user),
+                                        content="修改服务器资产：{ip}".format(ip=server_assets.ip),
+                                        type="server",
+                                        id=server_assets.id
+                                    )
+                                except Exception, e:
+                                    return JsonResponse(
+                                        {
+                                            'msg': "数据更新失败-写入数据失败",
+                                            "code": 400
+                                        }
+                                    )
+                return JsonResponse(
+                    {
+                        'msg': "数据更新成功",
+                        "code": 200
+                    }
+                )
+            else:
+                return JsonResponse(
+                    {
+                        'msg': "数据更新失败，系统可能不支持，未能获取数据",
+                        "code": 400
+                    }
+                )
+    else:
+        return JsonResponse(
+            {
+                'msg': "您没有该项操作的权限",
+                "code": 400
+            }
         )
