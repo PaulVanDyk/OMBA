@@ -431,7 +431,7 @@ def assets_facts(request, args=None):
                                         device_volume=mem.get('size'),
                                         device_status="Online"
                                     )
-                                except Exception, ex:
+                                except Exception, e:
                                     return JsonResponse(
                                         {
                                             'msg': "数据更新失败-写入数据失败",
@@ -523,3 +523,101 @@ def assets_facts(request, args=None):
                 "code": 400
             }
         )
+
+
+@login_required(login_url='/login')
+@permission_required('OpsManage.can_change_server_assets', login_url='/noperm/')
+def assets_import(request):
+    if request.method == "POST":
+        f = request.FILES.get('import_file')
+        filename = os.path.join(os.getcwd() + '/upload/', f.name)
+        if os.path.isdir(os.path.dirname(filename)) is not True:
+            os.makedirs(os.path.dirname(filename))
+        fobj = open(filename, 'wb')
+        for chrunk in f.chunks():
+            fobj.write(chrunk)
+        fobj.close()
+
+        # 读取上传的execl文件内容方法
+        def getAssetsData(fname=filename):
+            bk = xlrd.open_workbook(fname)
+            dataList = []
+            try:
+                server = bk.sheet_by_name("server")
+                net = bk.sheet_by_name("net")
+                for i in range(1, server.nrows):
+                    dataList.append(server.row_values(i))
+                for i in range(1, net.nrows):
+                    dataList.append(net.row_values(i))
+            except Exception, e:
+                return []
+            return dataList
+        dataList = getAssetsData(fname=filename)
+        # 获取服务器列表
+        for data in dataList:
+            assets = {
+                'assets_type': data[0],
+                'name': data[1],
+                'sn': data[2],
+                'buy_user': int(data[5]),
+                'management_ip': data[6],
+                'manufacturer': data[7],
+                'model': data[8],
+                'provider': data[9],
+                'status': int(data[10]),
+                'put_zone': int(data[11]),
+                'group': int(data[12]),
+                'project': int(data[13]),
+                'business': int(data[14]),
+            }
+            if data[3]:
+                assets['buy_time'] = xlrd.xldate.xldate_as_datetime(data[3], 0)
+            if data[4]:
+                assets['expire_date'] = xlrd.xldate.xldate_as_datetime(data[4], 0)
+            if assets.get('assets_type') in ['vmser', 'server']:
+                server_assets = {
+                    'ip': data[15],
+                    'keyfile': data[16],
+                    'username': data[17],
+                    'passwd': data[18],
+                    'hostname': data[19],
+                    'port': data[20],
+                    'raid': data[21],
+                    'line': data[22],
+                }
+            else:
+                net_assets = {
+                    'ip': data[15],
+                    'bandwidth': data[16],
+                    'port_number': data[17],
+                    'firmware': data[18],
+                    'cpu': data[19],
+                    'stone': data[20],
+                    'configure_detail': data[21]
+                }
+            count = Assets.objects.filter(name=assets.get('name')).count()
+            if count == 1:
+                assetsObj = Assets.objects.get(name=assets.get('name'))
+                Assets.objects.filter(name=assets.get('name')).update(**assets)
+                try:
+                    if assets.get('assets_type') in ['vmser', 'server']:
+                        Server_Assets.objects.filter(assets=assetsObj).update(**server_assets)
+                    elif assets.get('assets_type') in ['switch', 'route', 'printer', 'scanner', 'firewall', 'storage', 'wifi']:
+                        Network_Assets.objects.filter(assets=assetsObj).update(**net_assets)
+                except Exception, ex:
+                    print ex
+            else:
+                try:
+                    assetsObj = Assets.objects.create(**assets)
+                except Exception, ex:
+                    logger.warn(msg="批量写入资产失败: {ex}".format(ex=str(ex)))
+                if assetsObj:
+                    try:
+                        if assets.get('assets_type') in ['vmser', 'server']:
+                            Server_Assets.objects.create(assets=assetsObj, **server_assets)
+                        elif assets.get('assets_type') in ['switch', 'route', 'printer', 'scanner', 'firewall', 'storage', 'wifi']:
+                            Network_Assets.objects.create(assets=assetsObj, **net_assets)
+                    except Exception, ex:
+                        logger.warn(msg="批量更新资产失败: {ex}".format(ex=str(ex)))
+                        assetsObj.delete()
+        return HttpResponseRedirect('/assets_list')
