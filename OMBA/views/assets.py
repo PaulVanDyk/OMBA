@@ -526,7 +526,7 @@ def assets_facts(request, args=None):
 
 
 @login_required(login_url='/login')
-@permission_required('OpsManage.can_change_server_assets', login_url='/noperm/')
+@permission_required('OMBA.can_change_server_assets', login_url='/noperm/')
 def assets_import(request):
     if request.method == "POST":
         f = request.FILES.get('import_file')
@@ -621,3 +621,269 @@ def assets_import(request):
                         logger.warn(msg="批量更新资产失败: {ex}".format(ex=str(ex)))
                         assetsObj.delete()
         return HttpResponseRedirect('/assets_list')
+
+
+@login_required(login_url='/login')
+@permission_required('OMBA.can_read_assets', login_url='/noperm/')
+def assets_search(request):
+    AssetFieldsList = [n.name for n in Assets._meta.fields]
+    ServerAssetFieldsList = [n.name for n in Server_Assets._meta.fields]
+    if request.method == "GET":
+        manufacturerList = [
+            m.manufacturer for m in Assets.objects.raw(
+                'SELECT id, manufacturer from omba_assets WHERE  manufacturer is not null GROUP BY manufacturer'
+            )
+        ]
+        modelList = [
+            m.model for m in Assets.objects.raw(
+                'SELECT id, model from omba_assets WHERE model is not null  GROUP BY model'
+            )
+        ]
+        providerList = [
+            m.provider for m in Assets.objects.raw(
+                'SELECT id, provider from omba_assets WHERE provider is not null GROUP BY provider'
+            )
+        ]
+        cpuList = [
+            a.cpu for a in Assets.objects.raw(
+                'SELECT id, cpu from omba_server_assets WHERE cpu is not null GROUP BY cpu'
+            )
+        ]
+        buyUserList = User.objects.all()
+        selinuxList = [
+            m.selinux for m in Assets.objects.raw(
+                'SELECT id, selinux from omba_server_assets WHERE selinux is not null GROUP BY selinux'
+            )
+        ]
+        systemList = [
+            m.system for m in Assets.objects.raw(
+                'SELECT id, system from omba_server_assets WHERE system is not null GROUP BY system'
+            )
+        ]
+        kernelList = [
+            m.kernel for m in Assets.objects.raw(
+                'SELECT id, kernel from omba_server_assets WHERE kernel is not null GROUP BY kernel'
+            )
+        ]
+        return render(
+            request,
+            'assets/assets_search.html',
+            {
+                "user": request.user,
+                "baseAssets": getBaseAssets(),
+                "manufacturerList": manufacturerList,
+                "modelList": modelList,
+                "providerList": providerList,
+                "cpuList": cpuList,
+                "buyUserList": buyUserList,
+                "selinuxList": selinuxList,
+                "systemList": systemList,
+                'kernelList': kernelList,
+            },
+        )
+    elif request.method == "POST":
+        AssetIntersection = list(set(request.POST.keys()).intersection(set(AssetFieldsList)))
+        ServerAssetIntersection = list(set(request.POST.keys()).intersection(set(ServerAssetFieldsList)))
+        assetsList = []
+        data = dict()
+        # 格式化查询条件
+        for (k, v) in request.POST.items():
+            if v is not None and v != u'':
+                data[k] = v
+        if list(set(['buy_time', 'expire_date', 'vcpu_number', 'cpu_core', 'cpu_number', 'ram_total', 'swap', 'disk_total']).intersection(set(request.POST.keys()))):
+            try:
+                buy_time = request.POST.get('buy_time').split('-')
+                data.pop('buy_time')
+                data['buy_time__gte'] = buy_time[0] + '-01-01'
+                data['buy_time__lte'] = buy_time[1] + '-01-01'
+            except:
+                pass
+            try:
+                expire_date = request.POST.get('expire_date').split('-')
+                data.pop('expire_date')
+                data['expire_date__gte'] = expire_date[0] + '-01-01'
+                data['expire_date__lte'] = expire_date[1] + '-01-01'
+            except:
+                pass
+            try:
+                vcpu_number = request.POST.get('vcpu_number').split('-')
+                data.pop('vcpu_number')
+                data['vcpu_number__gte'] = int(vcpu_number[0])
+                data['vcpu_number__lte'] = int(vcpu_number[1])
+            except:
+                pass
+            try:
+                cpu_number = request.POST.get('cpu_number').split('-')
+                data.pop('cpu_number')
+                data['cpu_number__gte'] = int(cpu_number[0])
+                data['cpu_number__lte'] = int(cpu_number[1])
+            except:
+                pass
+            try:
+                cpu_core = request.POST.get('cpu_core').split('-')
+                data.pop('cpu_core')
+                data['cpu_core__gte'] = int(cpu_core[0])
+                data['cpu_core__lte'] = int(cpu_core[1])
+            except:
+                pass
+            try:
+                swap = request.POST.get('swap').split('-')
+                data.pop('swap')
+                data['swap__gte'] = int(swap[0])
+                data['swap__lte'] = int(swap[1])
+            except:
+                pass
+            try:
+                disk_total = request.POST.get('disk_total').split('-')
+                data.pop('disk_total')
+                data['disk_total__gte'] = int(disk_total[0]) * 1024
+                data['disk_total__lte'] = int(disk_total[1]) * 1024
+            except:
+                pass
+            try:
+                ram_total = request.POST.get('ram_total').split('-')
+                data.pop('ram_total')
+                data['ram_total__gte'] = int(ram_total[0])
+                data['ram_total__lte'] = int(ram_total[1])
+            except:
+                pass
+
+        if data.has_key('ip'):
+            for ds in NetworkCard_Assets.objects.filter(ip=data.get('ip')):
+                if ds.assets not in assetsList:
+                    assetsList.append(ds.assets)
+        else:
+            if len(AssetIntersection) > 0 and len(ServerAssetIntersection) > 0:
+                assetsData = dict()
+                for a in AssetIntersection:
+                    for k in data.keys():
+                        if k.find(a) != -1:
+                            assetsData[k] = data[k]
+                            data.pop(k)
+                serverList = [a.assets_id for a in Server_Assets.objects.filter(**data)]
+                assetsData['id__in'] = serverList
+                assetsList.extend(Assets.objects.filter(**assetsData))
+            elif len(AssetIntersection) > 0 and len(ServerAssetIntersection) == 0:
+                assetsList.extend(Assets.objects.filter(**data))
+            elif len(AssetIntersection) == 0 and len(ServerAssetIntersection) > 0:
+                for ds in Server_Assets.objects.filter(**data):
+                    if ds.assets not in assetsList:
+                        assetsList.append(ds.assets)
+        baseAssets = getBaseAssets()
+        dataList = []
+        for a in assetsList:
+            assets_id = '''<td class="text-center"><input type="checkbox" value="{aid}" name="ckbox"/></td>'''.format(aid=a.id)
+            if a.assets_type == "server":
+                assets_type = '''<td class="text-center"><button  type="button" class="btn btn-default disabled">服务器</button></td>'''
+            elif a.assets_type == "vmser":
+                assets_type = '''<td class="text-center"><button  type="button" class="btn btn-default disabled">虚拟机</button></td>'''
+            elif a.assets_type == "switch":
+                assets_type = '''<td class="text-center"><button  type="button" class="btn btn-default disabled">交换机</button></td>'''
+            elif a.assets_type == "route":
+                assets_type = '''<td class="text-center"><button  type="button" class="btn btn-default disabled">路由器</button></td>'''
+            elif a.assets_type == "printer":
+                assets_type = '''<td class="text-center"><button  type="button" class="btn btn-default disabled">打印机</button></td>'''
+            elif a.assets_type == "scanner":
+                assets_type = '''<td class="text-center"><button  type="button" class="btn btn-default disabled">扫描仪</button></td>'''
+            elif a.assets_type == "firewall":
+                assets_type = '''<td class="text-center"><button  type="button" class="btn btn-default disabled">防火墙</button></td>'''
+            elif a.assets_type == "storage":
+                assets_type = '''<td class="text-center"><button  type="button" class="btn btn-default disabled">存储设备</button></td>'''
+            elif a.assets_type == "wifi":
+                assets_type = '''<td class="text-center"><button  type="button" class="btn btn-default disabled">无线设备</button></td>'''
+            nks = ''
+            if a.management_ip:
+                liTags = ''
+                for ns in a.networkcard_assets_set.all():
+                    if ns.ip != 'unkown' and ns.ip != a.management_ip:
+                        liTag = '''<li><span class="label label-success">内</span>:<code>{address}</code></li>'''.format(address=ns.ip)
+                        liTags = liTags + liTag
+                nks = '''<ul class="list-unstyled">
+                             <li><span class="label label-danger">外</span>:<code>{management_ip}</code></li>
+                             {liTags}
+                         </ul>'''.format(management_ip=a.management_ip, liTags=liTags)
+            elif a.server_assets.ip:
+                liTags = ''
+                for ns in a.networkcard_assets_set.all():
+                    if ns.ip != 'unkown' and ns.ip != a.server_assets.ip:
+                        liTag = '''<li><span class="label label-success">内</span>:<code>{address}</code></li>'''.format(address=ns.ip)
+                        liTags = liTags + liTag
+                nks = '''<ul class="list-unstyled">
+                             <li><span class="label label-danger">外</span>:<code>{server_ip}</code></li>
+                             {liTags}
+                         </ul>'''.format(server_ip=a.server_assets.ip, liTags=liTags)
+            management_ip = '''<td class="text-center">{ip}</td>'''.format(ip=nks)
+            name = '''<td class="text-center">{name}</td>'''.format(name=a.name)
+            model = '''<td class="text-center">{model}</td>'''.format(model=a.model)
+            for p in baseAssets.get('project'):
+                if p.id == a.project:
+                    project = '''<td class="text-center">{project}</td>'''.format(project=p.project_name)
+            for s in baseAssets.get('service'):
+                if s.id == a.business:
+                    service = '''<td class="text-center"><button  type="button" class="btn btn-default disabled">{service}</button></td>'''.format(service=s.service_name)
+            if a.status == 0:
+                status = '''<td class="text-center"><button  type="button" class="btn btn-outline btn-success">已上线</button></td>'''
+            elif a.status == 1:
+                status = '''<td class="text-center"><button  type="button" class="btn btn-outline btn-primary">已下线</button></td>'''
+            elif a.status == 2:
+                status = '''<td class="text-center"><button  type="button" class="btn btn-outline btn-warning">维修中</button></td>'''
+            elif a.status == 3:
+                status = '''<td class="text-center"><button  type="button" class="btn btn-outline btn-info">已入库</button></td>'''
+            elif a.status == 4:
+                status = '''<td class="text-center"><button  type="button" class="btn btn-outline btn-default">未使用</button></td>'''
+            if a.buy_time:
+                buy_time = '''<td class="text-center">{buy_time}</td>'''.format(buy_time=a.buy_time)
+            else:
+                buy_time = '''<td class="text-center">{buy_time}</td>'''.format(buy_time=str(a.create_date)[0:10])
+            group = '''<td class="text-center">{groupname}</td>'''.format(groupname=Group.objects.get(id=a.group).name)
+            for z in baseAssets.get('zone'):
+                if z.id == a.put_zone:
+                    put_zone = '''<td class="text-center">{zone_name}</td>'''.format(zone_name=z.zone_name)
+                else:
+                    put_zone = '''<td class="text-center">未知</td>'''
+            try:
+                if a.assets_type in ["server", "vmser"]:
+                    assets_type_div = '''
+                        <div class="btn-group">                
+                            <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown">
+                                <font class="glyphicon glyphicon-refresh"></font>
+                                <span class="caret"></span>
+                            </button>                                                                                            
+                            <ul class="dropdown-menu" role="menu">
+                                <li>
+                                    <a href="javascript:" onclick='assetsUpdate(this,{server_assets_id},"{server_assets_ip}","setup")'>更新主体信息</a>
+                                </li>        
+                                <li>
+                                    <a href="javascript:" onclick='assetsUpdate(this,{server_assets_id},"{server_assets_ip}","crawHw")'>更新内存硬盘</a>
+                                </li>                                         
+                            </ul>
+                        </div>
+                    '''.format(server_assets_id=a.server_assets.id, server_assets_ip=a.server_assets.ip)
+                else:
+                    assets_type_div = '''
+                        <div class="btn-group">                
+                            <button type="button" class="btn btn-success dropdown-toggle disabled" data-toggle="dropdown">
+                                <font class="glyphicon glyphicon-refresh"></font>
+                                <span class="caret"></span>
+                            </button>                                                                                            
+                        </div>
+                    '''
+            except:
+                pass
+            opt = '''
+                <td class="text-center">
+                    <a href="/assets_view/{id}" style="text-decoration:none;"><button  type="button" class="btn btn-default"><abbr title="查看详细信息"><i class="glyphicon glyphicon-info-sign"></i></abbr></button></a>
+                    {assets_type_div}
+                    <a href="/assets_mod/{id}" style="text-decoration:none;"><button  type="button" class="btn btn-default"><abbr title="修改资料"><i class="glyphicon glyphicon-edit"></button></i></abbr></a>
+                    <button  type="button" class="btn btn-default" onclick="deleteAssets(this,{id})"><i class="glyphicon glyphicon-trash"></i></button>
+                </td>
+            '''.format(id=a.id, assets_type_div=assets_type_div)
+            dataList.append([assets_id, assets_type, management_ip, name, model, put_zone, project, service, group, buy_time, status, opt])
+        return JsonResponse(
+            {
+                'msg': "数据查询成功",
+                "code": 200,
+                'data': dataList,
+                'count': 0
+            }
+        )
