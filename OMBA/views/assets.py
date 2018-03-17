@@ -887,3 +887,193 @@ def assets_search(request):
                 'count': 0
             }
         )
+
+
+@login_required(login_url='/login')
+def assets_log(request, page):
+    if request.method == "GET":
+        allAssetsList = Log_Assets.objects.all().order_by('-id')[0:1000]
+        paginator = Paginator(allAssetsList, 25)
+        try:
+            assetsList = paginator.page(page)
+        except PageNotAnInteger:
+            assetsList = paginator.page(1)
+        except EmptyPage:
+            assetsList = paginator.page(paginator.num_pages)
+        return render(
+            request,
+            'assets/assets_log.html',
+            {
+                "user": request.user,
+                "assetsList": assetsList
+            }
+        )
+
+
+@login_required(login_url='/login')
+@permission_required('OMBA.can_change_assets', login_url='/noperm/')
+def assets_batch(request):
+    if request.method == "POST":
+        fList = []
+        sList = []
+        resource = []
+        serList = []
+        if request.POST.get('model') == 'update':
+            for ast in request.POST.getlist('assetsIds[]'):
+                try:
+                    assets = Assets.objects.get(id=int(ast))
+                except Exception, ex:
+                    logger.warn(msg="批量更新获取资产失败: {ex}".format(ex=str(ex)))
+                    continue
+                if assets.assets_type in ['vmser', 'server']:
+                    try:
+                        server_assets = Server_Assets.objects.get(assets=assets)
+                    except Exception, ex:
+                        logger.warn(msg="批量更新获取服务器资产失败: {ex}".format(ex=str(ex)))
+                        if server_assets.ip not in fList:
+                            fList.append(server_assets.ip)
+                        continue
+                    serList.append(server_assets.ip)
+                    if server_assets.keyfile == 1:
+                        resource.append(
+                            {
+                                "hostname": server_assets.ip,
+                                "port": int(server_assets.port),
+                                "username": server_assets.username
+                            }
+                        )
+                    else:
+                        resource.append(
+                            {
+                                "hostname": server_assets.ip,
+                                "port": server_assets.port,
+                                "username": server_assets.username,
+                                "password": server_assets.passwd
+                            }
+                        )
+            ANS = ANSRunner(resource)
+            ANS.run_model(host_list=serList, module_name='setup', module_args="")
+            data = ANS.handle_cmdb_data(ANS.get_model_result())
+            if data:
+                for ds in data:
+                    status = ds.get('status')
+                    sip = ds.get('ip')
+                    if status == 0:
+                        assets = Server_Assets.objects.get(ip=ds.get('ip')).assets
+                        assets.model = ds.get('model')
+                        assets.save()
+                        try:
+                            Server_Assets.objects.filter(ip=ds.get('ip')).update(
+                                cpu_number=ds.get('cpu_number'),
+                                kernel=ds.get('kernel'),
+                                selinux=ds.get('selinux'),
+                                hostname=ds.get('hostname'),
+                                system=ds.get('system'),
+                                cpu=ds.get('cpu'),
+                                disk_total=ds.get('disk_total'),
+                                cpu_core=ds.get('cpu_core'),
+                                swap=ds.get('swap'),
+                                ram_total=ds.get('ram_total'),
+                                vcpu_number=ds.get('vcpu_number')
+                            )
+                            if sip not in sList:
+                                sList.append(sip)
+                        except Exception:
+                            if sip not in fList:
+                                fList.append(sip)
+                        for nk in ds.get('nks'):
+                            macaddress = nk.get('macaddress')
+                            count = NetworkCard_Assets.objects.filter(assets=assets, macaddress=macaddress).count()
+                            if count > 0:
+                                try:
+                                    NetworkCard_Assets.objects.filter(assets=assets, macaddress=macaddress).update(
+                                        assets=assets,
+                                        device=nk.get('device'),
+                                        ip=nk.get('address'),
+                                        module=nk.get('module'),
+                                        mtu=nk.get('mtu'),
+                                        active=nk.get('active')
+                                    )
+                                except Exception, ex:
+                                    logger.warn(msg="批量更新更新服务器网卡资产失败: {ex}".format(ex=str(ex)))
+                            else:
+                                try:
+                                    NetworkCard_Assets.objects.create(
+                                        assets=assets, device=nk.get('device'),
+                                        macaddress=nk.get('macaddress'),
+                                        ip=nk.get('address'),
+                                        module=nk.get('module'),
+                                        mtu=nk.get('mtu'),
+                                        active=nk.get('active')
+                                    )
+                                except Exception, ex:
+                                    logger.warn(msg="批量更新写入服务器网卡资产失败: {ex}".format(ex=str(ex)))
+                    else:
+                        if sip not in fList:
+                            fList.append(sip)
+            if sList:
+                return JsonResponse(
+                    {
+                        'msg': "数据更新成功",
+                        "code": 200,
+                        'data': {
+                            "success": sList,
+                            "failed": fList
+                        }
+                    }
+                )
+            else:
+                return JsonResponse(
+                    {
+                        'msg': "数据更新失败",
+                        "code": 500,
+                        'data': {
+                            "success": sList,
+                            "failed": fList
+                        }
+                    }
+                )
+        elif request.POST.get('model') == 'delete':
+            for ast in request.POST.getlist('assetsIds[]'):
+                try:
+                    assets = Assets.objects.get(id=int(ast))
+                except Exception, ex:
+                    print ex
+                    continue
+                if assets.assets_type in ['vmser', 'server']:
+                    try:
+                        server_assets = Server_Assets.objects.get(assets=assets)
+                    except Exception, ex:
+                        fList.append(assets.management_ip)
+                        assets.delete()
+                        continue
+                    sList.append(server_assets.ip)
+                    server_assets.delete()
+                else:
+                    try:
+                        net_assets = Network_Assets.objects.get(assets=assets)
+                    except Exception, ex:
+                        fList.append(assets.management_ip)
+                        assets.delete()
+                        continue
+                    sList.append(assets.management_ip)
+                    net_assets.delete()
+                assets.delete()
+            return JsonResponse(
+                {
+                    'msg': "数据更新成功",
+                    "code": 200,
+                    'data': {
+                        "success": sList,
+                        "failed": fList
+                    }
+                }
+            )
+        else:
+            return JsonResponse(
+                {
+                    'msg': "操作失败",
+                    "code": 500,
+                    'data': "不支持的操作"
+                }
+            )
