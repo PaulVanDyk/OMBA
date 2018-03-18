@@ -1077,3 +1077,95 @@ def assets_batch(request):
                     'data': "不支持的操作"
                 }
             )
+
+
+@login_required(login_url='/login')
+@permission_required('OMBA.can_read_assets', login_url='/noperm/')
+def assets_server(request):
+    if request.method == "POST":
+        if request.POST.get('query') in ['service', 'project', 'group']:
+            dataList = []
+            if request.POST.get('query') == 'service':
+                for ser in Assets.objects.filter(business=request.POST.get('id')):
+                    dataList.append(
+                        {
+                            "id": ser.server_assets.id,
+                            "ip": ser.server_assets.ip
+                        }
+                    )
+            elif request.POST.get('query') == 'group':
+                for ser in Assets.objects.filter(group=request.POST.get('id')):
+                    dataList.append(
+                        {
+                            "id": ser.server_assets.id,
+                            "ip": ser.server_assets.ip
+                        }
+                    )
+            return JsonResponse(
+                {
+                    'msg': "主机查询成功",
+                    "code": 200,
+                    'data': dataList
+                }
+            )
+        else:
+            JsonResponse(
+                {
+                    'msg': "不支持的操作",
+                    "code": 500,
+                    'data': []
+                }
+            )
+    else:
+        return JsonResponse(
+            {
+                'msg': "操作失败",
+                "code": 500,
+                'data': "不支持的操作"
+            }
+        )
+
+
+@login_required(login_url='/login')
+@permission_required('OMBA.can_read_assets', login_url='/noperm/')
+def assets_groups(request, id):
+    try:
+        project = Project_Assets.objects.get(id=id)
+    except Project_Assets.DoesNotExist:
+        return render(
+            request,
+            'assets/assets_groups.html',
+            {
+                "user": request.user,
+                "errorInfo": "项目不存在"
+            }
+        )
+    serviceList = Service_Assets.objects.filter(project=project)
+    for ds in serviceList:
+        dataList = []
+        for ser in Assets.objects.select_related().filter(business=ds.id):
+            if ser.server_assets.ram_total:
+                ser.server_assets.ram_total = str(int(ser.server_assets.ram_total) / 1024) + 'GB'
+            else:
+                ser.server_assets.ram_total = '0GB'
+            if ser.server_assets.disk_total:
+                disk_total = int(ser.server_assets.disk_total) / 1024 / 1024
+                if disk_total > 1:
+                    ser.server_assets.disk_total = str(int(ser.server_assets.disk_total) / 1024 / 1024) + 'TB'
+                else:
+                    ser.server_assets.disk_total = str(int(ser.server_assets.disk_total) / 1024) + 'GB'
+            else:
+                ser.server_assets.disk_total = '0GB'
+            dataList.append(ser)
+            ds.host = dataList
+    totalServer = Assets.objects.filter(project=id).count()
+    return render(
+        request,
+        'assets/assets_groups.html',
+        {
+            "user": request.user,
+            "project": project,
+            "serviceList": serviceList,
+            "totalServer": totalServer
+        }
+    )
