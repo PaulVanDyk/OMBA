@@ -21,7 +21,9 @@ from django.contrib.auth.decorators import permission_required
 @login_required(login_url='/login')
 def index(request):
     # 7天更新频率统计
-    userList = Project_Order.objects.raw('''SELECT id, order_user FROM omba_project_order GROUP BY order_user;''')
+    userList = Project_Order.objects.raw(
+        '''SELECT id, order_user FROM omba_project_order GROUP BY order_user;'''
+    )
     userList = [u.order_user for u in userList]
     dataList = [base.getDaysAgo(num) for num in xrange(0, 7)][::-1]    # 将日期逆序
     dateList = []
