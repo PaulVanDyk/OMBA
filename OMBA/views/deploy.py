@@ -224,3 +224,184 @@ def deploy_modf(request, pid):
             for ip in delList:
                 Project_Number.objects.filter(project=project, server=ip).delete()
         return HttpResponseRedirect('/deploy_mod/{id}/'.format(id=pid))
+
+
+@login_required()
+@permission_required('OMBA.can_read_project_config', login_url='/noperm/')
+def deploy_list(request):
+    deployList = Project_Config.objects.all()
+    for ds in deployList:
+        ds.number = Project_Number.objects.filter(project=ds)
+    uatProject = Project_Config.objects.filter(project_env="uat").count()
+    qaProject = Project_Config.objects.filter(project_env="qa").count()
+    sitProject = Project_Config.objects.filter(project_env="sit").count()
+    return render(
+        request,
+        'deploy/deploy_list.html',
+        {
+            "user": request.user,
+            "totalProject": deployList.count(),
+            "deployList": deployList,
+            "uatProject": uatProject,
+            "qaProject": qaProject,
+            "sitProject": sitProject
+        },
+    )
+
+
+@login_required()
+@permission_required('OMBA.can_change_project_config', login_url='/noperm/')
+def deploy_init(request, pid):
+    if request.method == "POST":
+        project = Project_Config.objects.select_related().get(id=pid)
+        if project.project_repertory == 'git':
+            version = GitTools()
+        elif project.project_repertory == 'svn':
+            version = SvnTools()
+        version.mkdir(dir=project.project_repo_dir)
+        version.mkdir(dir=project.project_dir)
+        result = version.clone(
+            url=project.project_address,
+            dir=project.project_repo_dir,
+            user=project.project_repo_user,
+            passwd=project.project_repo_passwd
+        )
+        if result[0] > 0:
+            return JsonResponse(
+                {
+                    'msg': result[1],
+                    "code": 500,
+                    'data': []
+                }
+            )
+        else:
+            Project_Config.objects.filter(id=pid).update(project_status=1)
+            recordProject.delay(
+                project_user=str(request.user),
+                project_id=project.id,
+                project_name=project.project.project_name,
+                project_content="初始化项目"
+            )
+            return JsonResponse(
+                {
+                    'msg': "初始化成功",
+                    "code": 200,
+                    'data': []
+                }
+            )
+
+
+@login_required()
+def deploy_version(request, pid):
+    try:
+        project = Project_Config.objects.select_related().get(id=pid)
+        if project.project_repertory == 'git':
+            version = GitTools()
+    except:
+        return render(
+            request,
+            'deploy/deploy_version.html',
+            {
+                "user": request.user,
+                "errorInfo": "项目不存在，可能已经被删除."
+            },
+        )
+    if request.method == "POST":
+        try:
+            project = Project_Config.objects.get(id=pid)
+            if project.project_repertory == 'git':
+                version = GitTools()
+            elif project.project_repertory == 'svn':
+                version = SvnTools()
+        except:
+            return JsonResponse(
+                {
+                    'msg': "项目资源不存在",
+                    "code": 403,
+                    'data': []
+                }
+            )
+        if project.project_status == 0:
+            return JsonResponse(
+                {
+                    'msg': "请先初始化项目",
+                    "code": 403,
+                    'data': []
+                }
+            )
+        if request.POST.get('op') in ['create', 'delete', 'query', 'histroy']:
+            if request.POST.get('op') == 'create':
+                if request.POST.get('model') == 'branch':
+                    result = version.createBranch(
+                        path=project.project_repo_dir,
+                        branchName=request.POST.get('name')
+                    )
+                elif request.POST.get('model') == 'tag':
+                    result = version.createTag(
+                        path=project.project_repo_dir,
+                        tagName=request.POST.get('name')
+                    )
+            elif request.POST.get('op') == 'delete':
+                if request.POST.get('model') == 'branch':
+                    result = version.delBranch(
+                        path=project.project_repo_dir,
+                        branchName=request.POST.get('name')
+                    )
+                elif request.POST.get('model') == 'tag':
+                    result = version.delTag(
+                        path=project.project_repo_dir,
+                        tagName=request.POST.get('name')
+                    )
+            elif request.POST.get('op') == 'query':
+                if project.project_model == 'branch':
+                    result = version.log(
+                        path=project.project_repo_dir,
+                        bName=request.POST.get('name'),
+                        number=50
+                    )
+                    return JsonResponse(
+                        {
+                            'msg': "操作成功",
+                            "code": 200,
+                            'data': result
+                        }
+                    )
+                else:
+                    result = version.tag(path=project.project_repo_dir)
+            elif request.POST.get('op') == 'histroy':
+                result = version.show(
+                    path=project.project_repo_dir,
+                    branch=request.POST.get('project_branch'),
+                    cid=request.POST.get('project_version', None)
+                )
+                return JsonResponse(
+                    {
+                        'msg': "操作成功",
+                        "code": 200,
+                        'data': "<pre> <xmp>" + result[1].replace('<br>', '\n') + "</xmp></pre>"
+                    }
+                )
+        else:
+            return JsonResponse(
+                {
+                    'msg': "非法操作",
+                    "code": 500,
+                    'data': []
+                }
+            )
+        if result[0] > 0:
+            return JsonResponse(
+                {
+                    'msg': result[1],
+                    "code": 500,
+                    'data': []
+                }
+            )
+        else:
+            return JsonResponse(
+                {
+                    'msg': "操作成功",
+                    "code": 200,
+                    'data': []
+                }
+            )
