@@ -405,3 +405,351 @@ def deploy_version(request, pid):
                     'data': []
                 }
             )
+
+
+@login_required()
+def deploy_run(request, pid):
+    try:
+        project = Project_Config.objects.get(id=pid)
+        serverList = Project_Number.objects.filter(project=project)
+        if project.project_repertory == 'git':
+            version = GitTools()
+        elif project.project_repertory == 'svn':
+            version = SvnTools()
+    except:
+        return render(
+            request,
+            'deploy/deploy_run.html',
+            {
+                "user": request.user,
+                "errorInfo": "项目不存在，可能已经被删除."
+            },
+        )
+    if request.method == "GET":
+        if project.project_model == 'branch':
+            bList = version.branch(path=project.project_repo_dir)
+        elif project.project_model == 'tag':
+            bList = version.tag(path=project.project_repo_dir)
+        # 获取最新版本
+        version.pull(path=project.project_repo_dir)
+        vList = version.log(path=project.project_repo_dir, number=50)
+        return render(
+            request,
+            'deploy/deploy_run.html',
+            {
+                "user": request.user,
+                "project": project,
+                "serverList": serverList,
+                "bList": bList,
+                "vList": vList
+            },
+        )
+    elif request.method == "POST":
+        if request.POST.getlist('project_server', None):
+            serverList = [Project_Number.objects.get(project=project, server=ds) for ds in request.POST.getlist('project_server')]
+            allServerList = [ds.server for ds in Project_Number.objects.filter(project=project)]
+            # 获取项目目标服务器列表与分批部署服务器（post提交）列表的差集
+            tmpServer = [i for i in allServerList if i not in request.POST.getlist('project_server')]
+        elif request.POST.get('project_model', None) == "rollback":
+            tmpServer = None
+        else:
+            return JsonResponse(
+                {
+                    'msg': "项目部署失败：未选择目标服务器",
+                    "code": 500,
+                    'data': []
+                }
+            )
+        if DsRedis.OpsProject.get(redisKey=project.project_uuid + "-locked") is None:  # 判断该项目是否有人在部署
+            # 给项目部署加上锁
+            DsRedis.OpsProject.set(redisKey=project.project_uuid + "-locked", value=request.user)
+            DsRedis.OpsDeploy.delete(project.project_uuid)
+            if request.POST.get('project_model', None) == "rollback":
+                project_content = "回滚项目"
+                if project.project_model == 'branch':
+                    verName = request.POST.get('project_version')
+                    trueDir = project.project_dir + project.project_env + '/' + request.POST.get('project_version') + '/'
+                    DsRedis.OpsDeploy.lpush(
+                        project.project_uuid,
+                        data="[Start] Start Rollback branch:%s  vesion: %s" % (
+                            request.POST.get('project_branch'),
+                            request.POST.get('project_version')
+                        )
+                    )
+                elif project.project_model == 'tag':
+                    verName = request.POST.get('project_branch')
+                    trueDir = project.project_dir + project.project_env + '/' + request.POST.get('project_branch') + '/'
+                    DsRedis.OpsDeploy.lpush(
+                        project.project_uuid,
+                        data="[Start] Start Rollback tag:%s" % request.POST.get('project_branch')
+                    )
+                # 创建版本目录
+                base.mkdir(dirPath=trueDir)
+                DsRedis.OpsDeploy.lpush(
+                    project.project_uuid,
+                    data="[Running] Mkdir version dir: {dir} ".format(dir=trueDir)
+                )
+                # 创建快捷方式
+                softdir = project.project_dir + project.project.project_name + '/'
+                result = base.lns(spath=trueDir, dpath=softdir.rstrip('/'))
+                DsRedis.OpsDeploy.lpush(
+                    project.project_uuid,
+                    data="[Running] Make softlink cmd:  ln -s  {sdir} {ddir} info: {info}".format(
+                        sdir=trueDir,
+                        ddir=softdir,
+                        info=result[1]
+                    )
+                )
+                if result[0] > 0:
+                    return JsonResponse(
+                        {
+                            'msg': result[1],
+                            "code": 500,
+                            'data': []
+                        }
+                    )
+                # 获取要排除的文件
+                exclude = None
+                if project.project_exclude:
+                    try:
+                        exclude = ''
+                        for s in project.project_exclude.split(','):
+                            exclude = "--exclude='{file}'".format(file=s.replace('\r\n', '').replace('\n', '').strip()) + ' ' + exclude
+                    except Exception, e:
+                        return JsonResponse(
+                            {
+                                'msg': str(e),
+                                "code": 500,
+                                'data': []
+                            }
+                        )
+            else:
+                project_content = "部署项目"
+                # 判断版本上线类型再切换分支到指定的分支/Tag
+                if project.project_model == 'branch':
+                    bName = request.POST.get('project_branch')
+                    result = version.checkOut(path=project.project_repo_dir, name=bName)
+                    DsRedis.OpsDeploy.lpush(project.project_uuid, data="[Start] Switched to branch %s" % bName)
+                    # reset到指定版本
+                    result = version.reset(path=project.project_repo_dir, commintId=request.POST.get('project_version'))
+                    DsRedis.OpsDeploy.lpush(
+                        project.project_uuid,
+                        data="[Running] Git reset to {comid} info: {info}".format(
+                            comid=request.POST.get('project_version'),
+                            info=result[1]
+                        )
+                    )
+                    trueDir = project.project_dir + project.project_env + '/' + request.POST.get('project_version') + '/'
+                    verName = bName + '_' + request.POST.get('project_version', '未知')
+                elif project.project_model == 'tag':
+                    bName = request.POST.get('project_branch')
+                    result = version.checkOut(path=project.project_repo_dir, name=bName)
+                    DsRedis.OpsDeploy.lpush(project.project_uuid, data="[Start] Switched to tag %s" % bName)
+                    trueDir = project.project_dir + project.project_env + '/' + bName + '/'
+                    verName = bName
+                # 创建版本目录
+                base.mkdir(dirPath=trueDir)
+                DsRedis.OpsDeploy.lpush(
+                    project.project_uuid,
+                    data="[Running] Mkdir version dir: {dir} ".format(dir=trueDir)
+                )
+                # 创建快捷方式
+                softdir = project.project_dir + project.project.project_name + '/'
+                result = base.lns(spath=trueDir, dpath=softdir.rstrip('/'))
+                DsRedis.OpsDeploy.lpush(
+                    project.project_uuid,
+                    data="[Running] Make softlink cmd:  ln -s  {sdir} {ddir} info: {info}".format(
+                        sdir=trueDir,
+                        ddir=softdir,
+                        info=result[1]
+                    )
+                )
+                if result[0] > 0:
+                    return JsonResponse(
+                        {
+                            'msg': result[1],
+                            "code": 500,
+                            'data': []
+                        }
+                    )
+                # 获取要排除的文件
+                exclude = None
+                if project.project_exclude:
+                    try:
+                        exclude = ''
+                        for s in project.project_exclude.split(','):
+                            exclude = "--exclude='{file}'".format(file=s.replace('\r\n', '').replace('\n', '').strip()) + ' ' + exclude
+                    except Exception, e:
+                        return JsonResponse(
+                            {
+                                'msg': str(e),
+                                "code": 500,
+                                'data': []
+                            }
+                        )
+                # 执行部署命令 - 编译型语言
+                if project.project_local_command:
+                    result = base.cmds(cmds=project.project_local_command)
+                    DsRedis.OpsDeploy.lpush(
+                        project.project_uuid,
+                        data="[Running] Execute local command: {cmds} info: {info}".format(
+                            cmds=project.project_local_command,
+                            info=result[1]
+                        )
+                    )
+                    if result[0] > 0:
+                        return JsonResponse(
+                            {
+                                'msg': result[1],
+                                "code": 500,
+                                'data': []
+                            }
+                        )
+                # 非编译型语言
+                else:
+                    # 配置rsync同步文件到本地目录
+                    result = base.rsync(
+                        sourceDir=project.project_repo_dir,
+                        destDir=trueDir,
+                        exclude=exclude
+                    )
+                    DsRedis.OpsDeploy.lpush(
+                        project.project_uuid,
+                        data="[Running] Rsync {sDir} to {dDir} exclude {exclude}".format(
+                            sDir=project.project_repo_dir,
+                            dDir=trueDir,
+                            exclude=exclude
+                        )
+                    )
+                    if result[0] > 0:
+                        return JsonResponse(
+                            {
+                                'msg': result[1],
+                                "code": 500,
+                                'data': []
+                            }
+                        )
+                # 授权文件
+                result = base.chown(user=project.project_user, path=trueDir)
+                DsRedis.OpsDeploy.lpush(
+                    project.project_uuid,
+                    data="[Running] Chown {user} to {path}".format(
+                        user=project.project_user,
+                        path=trueDir
+                    )
+                )
+                if result[0] > 0:
+                    return JsonResponse(
+                        {
+                            'msg': result[1],
+                            "code": 500,
+                            'data': []
+                        }
+                    )
+            # 调用ansible同步代码到远程服务器上
+            resource = []
+            hostList = []
+            for ds in serverList:
+                server = Server_Assets.objects.get(ip=ds.server)
+                hostList.append(ds.server)
+                data = dict()
+                if server.keyfile == 1:
+                    data['port'] = int(server.port)
+                    data["hostname"] = server.ip
+                    data["username"] = server.username
+                else:
+                    data["hostname"] = server.ip
+                    data["port"] = int(server.port)
+                    data["username"] = server.username
+                    data["password"] = server.passwd
+                resource.append(data)
+            if resource and hostList:
+                if exclude:
+                    args = '''src={srcDir} dest={desDir} links=yes recursive=yes compress=yes delete=yes rsync_opts="{exclude}"'''.format(
+                        srcDir=softdir,
+                        desDir=ds.dir,
+                        exclude=exclude
+                    )
+                else:
+                    args = '''src={srcDir} dest={desDir} links=yes recursive=yes compress=yes delete=yes'''.format(
+                        srcDir=softdir,
+                        desDir=ds.dir
+                    )
+                ANS = ANSRunner(resource)
+                ANS.run_model(host_list=hostList, module_name='synchronize', module_args=args)
+                # 精简返回的结果
+                dataList = ANS.handle_model_data(ANS.get_model_result(), 'synchronize', module_args=args)
+                for ds in dataList:
+                    DsRedis.OpsDeploy.lpush(
+                        project.project_uuid,
+                        data="[Running] Rsync project to {host} status: {status} msg: {msg}".format(
+                            host=ds.get('ip'),
+                            status=ds.get('status'),
+                            msg=ds.get('msg')
+                        )
+                    )
+                    if ds.get('status') == 'failed':
+                        result = (1, ds.get('ip') + ds.get('msg'))
+            # 目标服务器执行后续命令
+            if project.project_remote_command:
+                ANS.run_model(
+                    host_list=hostList,
+                    module_name='raw',
+                    module_args=project.project_remote_command
+                )
+                # 精简返回的结果
+                dataList = ANS.handle_model_data(
+                    ANS.get_model_result(),
+                    'raw',
+                    module_args=project.project_remote_command
+                )
+                for ds in dataList:
+                    DsRedis.OpsDeploy.lpush(
+                        project.project_uuid,
+                        data="[Running] Execute command to {host} status: {status} msg: {msg}".format(
+                            host=ds.get('ip'),
+                            status=ds.get('status'),
+                            msg=ds.get('msg')
+                        )
+                    )
+                    if ds.get('status') == 'failed':
+                        result = (1, "部署错误: " + ds.get('msg'))
+            if result[0] > 0:
+                DsRedis.OpsProject.delete(redisKey=project.project_uuid + "-locked")
+                return JsonResponse(
+                    {
+                        'msg': result[1],
+                        "code": 500,
+                        'data': []
+                    }
+                )
+            DsRedis.OpsDeploy.lpush(project.project_uuid, data="[Done] Deploy Success.")
+            # 切换版本之后取消项目部署锁
+            DsRedis.OpsProject.delete(redisKey=project.project_uuid + "-locked")
+            # 异步记入操作日志
+            # if request.POST.get('project_version'):
+            #     bName = request.POST.get('project_version')
+            recordProject.delay(
+                project_user=str(request.user),
+                project_id=project.id,
+                project_name=project.project.project_name,
+                project_content=project_content,
+                project_branch=verName
+            )
+            return JsonResponse(
+                {
+                    'msg': "项目部署成功",
+                    "code": 200,
+                    'data': tmpServer
+                }
+            )
+        else:
+            return JsonResponse(
+                {
+                    'msg': "项目部署失败：{user}正在部署改项目，请稍后再提交部署。".format(
+                        user=DsRedis.OpsProject.get(redisKey=project.project_uuid + "-locked")
+                    ),
+                    "code": 500,
+                    'data': []
+                }
+            )
