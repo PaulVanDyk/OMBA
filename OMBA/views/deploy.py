@@ -746,10 +746,99 @@ def deploy_run(request, pid):
         else:
             return JsonResponse(
                 {
-                    'msg': "项目部署失败：{user}正在部署改项目，请稍后再提交部署。".format(
+                    'msg': "项目部署失败：{user}正在部署该项目，请稍后再提交部署。".format(
                         user=DsRedis.OpsProject.get(redisKey=project.project_uuid + "-locked")
                     ),
                     "code": 500,
                     'data': []
                 }
             )
+
+
+@login_required()
+def deploy_result(request, pid):
+    if request.method == "POST":
+        msg = DsRedis.OpsDeploy.rpop(request.POST.get('project_uuid'))
+        if msg:
+            return JsonResponse(
+                {
+                    'msg': msg,
+                    "code": 200,
+                    'data': []
+                }
+            )
+        else:
+            return JsonResponse(
+                {
+                    'msg': None,
+                    "code": 200,
+                    'data': []
+                }
+            )
+
+
+@login_required()
+@permission_required('OMBA.can_add_project_order', login_url='/noperm/')
+def deploy_ask(request, pid):
+    try:
+        project = Project_Config.objects.get(id=pid)
+        if project.project_repertory == 'git':
+            version = GitTools()
+        elif project.project_repertory == 'svn':
+            version = SvnTools()
+    except:
+        return render(
+            request,
+            'deploy/deploy_ask.html',
+            {
+                "user": request.user,
+                "errorInfo": "项目不存在，可能已经被删除."
+            },
+        )
+    if request.method == "GET":
+        vList = None
+        version.pull(path=project.project_repo_dir)
+        if project.project_model == 'branch':
+            # 获取最新版本
+            bList = version.branch(path=project.project_repo_dir)
+            vList = version.log(path=project.project_repo_dir, number=50)
+        elif project.project_model == 'tag':
+            bList = version.tag(path=project.project_repo_dir)
+        audit_group = Group.objects.get(id=project.project_audit_group)
+        userList = [u.get('username') for u in audit_group.user_set.values()]
+        return render(
+            request,
+            'deploy/deploy_ask.html',
+            {
+                "user": request.user,
+                "project": project,
+                "userList": userList,
+                "bList": bList,
+                "vList": vList
+            },
+        )
+    elif request.method == "POST":
+        try:
+            order = Project_Order.objects.create(
+                order_user=request.user,
+                order_project=project,
+                order_subject=request.POST.get('order_subject'),
+                order_audit=request.POST.get('order_audit'),
+                order_status=request.POST.get('order_status', 2),
+                order_level=request.POST.get('order_level'),
+                order_content=request.POST.get('order_content'),
+                order_branch=request.POST.get('order_branch', None),
+                order_comid=request.POST.get('order_comid', None),
+                order_tag=request.POST.get('order_tag', None)
+            )
+            sendDeployNotice.delay(order_id=order.id, mask='【申请中】')
+        except Exception, e:
+            return render(
+                request,
+                'deploy/deploy_ask.html',
+                {
+                    "user": request.user,
+                    "errorInfo": "项目部署申请失败：%s" % str(e)
+                },
+            )
+        return HttpResponseRedirect('/deploy_ask/{id}/'.format(id=pid))
