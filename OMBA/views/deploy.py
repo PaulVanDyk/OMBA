@@ -842,3 +842,128 @@ def deploy_ask(request, pid):
                 },
             )
         return HttpResponseRedirect('/deploy_ask/{id}/'.format(id=pid))
+
+
+@login_required()
+def deploy_order(request, page):
+    if request.method == "GET":
+        allOrderList = Project_Order.objects.filter(
+            Q(order_user=User.objects.get(username=request.user)) |
+            Q(order_audit=User.objects.get(username=request.user))
+        ).order_by("-id")[0:1000]
+        totalOrder = Project_Order.objects.all().count()
+        doneOrder = Project_Order.objects.filter(order_status=3).count()
+        authOrder = Project_Order.objects.filter(order_status=2).count()
+        rejectOrder = Project_Order.objects.filter(order_status=1).count()
+        deploy_nmuber = Project_Order.objects.values('order_user').annotate(dcount=Count('order_user'))
+        deploy_project = Project_Order.objects.values('order_project').annotate(dcount=Count('order_project'))
+        paginator = Paginator(allOrderList, 25)
+        try:
+            orderList = paginator.page(page)
+        except PageNotAnInteger:
+            orderList = paginator.page(1)
+        except EmptyPage:
+            orderList = paginator.page(paginator.num_pages)
+        for ds in deploy_project:
+            ds['order_project'] = Project_Config.objects.get(id=ds.get('order_project')).project.project_name
+        return render(
+            request,
+            'deploy/deploy_order.html',
+            {
+                "user": request.user,
+                "orderList": orderList,
+                "totalOrder": totalOrder,
+                "doneOrder": doneOrder,
+                "authOrder": authOrder,
+                "rejectOrder": rejectOrder,
+                "deploy_nmuber": deploy_nmuber,
+                "deploy_project": deploy_project
+            },
+        )
+    elif request.method == "POST" and request.user.has_perm('OMBA.can_add_project_order'):
+        if request.POST.get('model') in ['disable', 'auth', 'finish']:
+            try:
+                Project_Order.objects.filter(id=request.POST.get('id')).update(
+                    order_status=request.POST.get('order_status'),
+                    order_cancel=request.POST.get('order_cancel', None),
+                )
+                if request.POST.get('model') == 'auth':
+                    sendDeployNotice.delay(order_id=request.POST.get('id'), mask='【已授权】')
+                elif request.POST.get('model') == 'finish':
+                    sendDeployNotice.delay(order_id=request.POST.get('id'), mask='【已部署】')
+                elif request.POST.get('model') == 'disable':
+                    sendDeployNotice.delay(order_id=request.POST.get('id'), mask='【已取消】')
+            except Exception, e:
+                return JsonResponse(
+                    {
+                        'msg': "操作失败：" + str(e),
+                        "code": 500,
+                        'data': []
+                    }
+                )
+            return JsonResponse(
+                {
+                    'msg': "操作成功",
+                    "code": 200,
+                    'data': []
+                }
+            )
+        else:
+            return JsonResponse(
+                {
+                    'msg': "非法操作",
+                    "code": 500,
+                    'data': []
+                }
+            )
+    else:
+        return JsonResponse(
+            {
+                'msg': "您无权操作此项",
+                "code": 500,
+                'data': []
+            }
+        )
+
+
+@login_required()
+@permission_required('OMBA.can_add_project_order', login_url='/noperm/')
+def deploy_order_status(request, pid):
+    if request.method == "GET":
+        try:
+            order = Project_Order.objects.get(id=pid)
+            serverList = Project_Number.objects.filter(project=order.order_project)
+            if order.order_audit == str(request.user): order.order_perm = 'pass'
+        except:
+            return render(
+                request,
+                'deploy/deploy_ask.html',
+                {
+                    "user": request.user,
+                    "errorInfo": "工单不存在，可能已经被删除."
+                },
+            )
+        return render(
+            request,
+            'deploy/deploy_order_status.html',
+            {
+                "user": request.user,
+                "order": order,
+                "serverList": serverList
+            },
+        )
+
+
+@login_required()
+@permission_required('OMBA.can_add_project_order', login_url='/noperm/')
+def deploy_order_rollback(request, pid):
+    if request.method == "GET":
+        order = Project_Order.objects.get(id=pid)
+        return render(
+            request,
+            'deploy/deploy_order_rollback.html',
+            {
+                "user": request.user,
+                "order": order
+            },
+        )
