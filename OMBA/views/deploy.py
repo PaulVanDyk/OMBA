@@ -967,3 +967,60 @@ def deploy_order_rollback(request, pid):
                 "order": order
             },
         )
+
+
+@login_required()
+def deploy_manage(request, pid):
+    try:
+        project = Project_Config.objects.get(id=pid)
+        if project.project_repertory == 'git':
+            version = GitTools()
+        elif project.project_repertory == 'svn':
+            version = SvnTools()
+    except:
+        return render(
+            request,
+            'deploy/deploy_manage.html',
+            {
+                "user": request.user,
+                "errorInfo": "项目不存在，可能已经被删除."
+            },
+        )
+    if request.method == "GET":
+        # 获取最新版本
+        version.pull(path=project.project_repo_dir)
+        if project.project_model == 'branch':
+            bList = version.branch(path=project.project_repo_dir)
+        elif project.project_model == 'tag':
+            bList = version.tag(path=project.project_repo_dir)
+        vList = version.log(path=project.project_repo_dir, number=50)
+        return render(
+            request,
+            'deploy/deploy_manage.html',
+            {
+                "user": request.user,
+                "project": project,
+                "bList": bList, "vList": vList
+            },
+        )
+
+
+@login_required(login_url='/login')
+def deploy_log(request, page):
+    if request.method == "GET":
+        allProjectList = Log_Project_Config.objects.all().order_by('-id')[0:1000]
+        paginator = Paginator(allProjectList, 25)
+        try:
+            projectList = paginator.page(page)
+        except PageNotAnInteger:
+            projectList = paginator.page(1)
+        except EmptyPage:
+            projectList = paginator.page(paginator.num_pages)
+        return render(
+            request,
+            'deploy/deploy_log.html',
+            {
+                "user": request.user,
+                "projectList": projectList
+            },
+        )
