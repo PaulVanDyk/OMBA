@@ -7,6 +7,7 @@ from django.contrib.auth.decorators import login_required
 from celery.registry import tasks as cTasks
 from celery.five import keys
 from django.contrib.auth.decorators import permission_required
+from OMBA.utils.logger import logger
 
 
 @login_required()
@@ -231,7 +232,7 @@ def task_view(request):
                 if task.startswith('OpsManage.tasks.ansible') or task.startswith('OpsManage.tasks.sched'):
                     regTaskList.append(task)
         except Exception, ex:
-            print ex
+            logger.warn(msg="获取Celery Task失败: {ex}".format(ex=str(ex)))
             taskLog = []
         return render(
             request,
@@ -282,7 +283,8 @@ def task_view(request):
                             "msg": "操作成功"
                         }
                     )
-                except Exception, e:
+                except Exception, ex:
+                    logger.warn(msg="查看Celery Task运行日志失败: {ex}".format(ex=str(ex)))
                     return JsonResponse(
                         {
                             "code": 500,

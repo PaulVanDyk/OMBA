@@ -14,6 +14,7 @@ from ansible.plugins.callback import CallbackBase
 from ansible.executor.playbook_executor import PlaybookExecutor
 from OMBA.data.DsRedisOps import DsRedis
 from OMBA.data.DsMySQL import AnsibleSaveResult
+from OMBA.utils.logger import logger
 
 
 class MyInventory(Inventory):
@@ -608,6 +609,7 @@ class ANSRunner(object):
             constants.HOST_KEY_CHECKING = False
             tqm.run(play)
         except Exception as err:
+            logger.error(msg="run model failed: {err}".format(err=str(err)))
             if self.redisKey:
                 DsRedis.OpsAnsibleModel.lpush(self.redisKey, data=err)
             if self.logId:
@@ -642,9 +644,10 @@ class ANSRunner(object):
             executor._tqm._stdout_callback = self.callback
             constants.HOST_KEY_CHECKING = False
             constants.DEPRECATION_WARNINGS = False
+            constants.RETRY_FILES_ENABLED = False
             executor.run()
         except Exception as err:
-            print err
+            logger.error(msg="run playbook failed: {err}".format(err=str(err)))
             if self.redisKey:
                 DsRedis.OpsAnsibleModel.lpush(self.redisKey, data=err)
             if self.logId:

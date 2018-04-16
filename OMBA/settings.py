@@ -131,6 +131,10 @@ INSTALLED_APPS = [
     'rest_framework',
     'djcelery',
     'channels',
+    'elfinder',
+    'storages',
+    'wiki',
+    'api',
 ]
 
 MIDDLEWARE = [
@@ -146,6 +150,11 @@ MIDDLEWARE = [
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
+    ),
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_jwt.authentication.JSONWebTokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+        'rest_framework.authentication.BasicAuthentication',
     ),
 }
 
@@ -228,5 +237,14 @@ STATIC_URL = '/static/'
 STATICFILES_DIRS = (
     os.path.join(BASE_DIR, 'static')
 )
+
+MEDIA_ROOT = os.path.join(BASE_DIR, 'upload/')
+MEDIA_URL = '/upload/'
+SFTP_CONF = {
+    'port': 22,
+    'username': 'root',
+    'password': 'welliam',
+    'timeout': 30
+}  # 修改成能sftp登陆OpsManage的账户
 
 LOGIN_URL = '/login'

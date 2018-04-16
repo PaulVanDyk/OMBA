@@ -936,7 +936,7 @@ class Cron_Config(models.Model):
         default=None
     )
     cron_script = models.FileField(
-        upload_to='./upload/cron/',
+        upload_to='./cron/',
         blank=True,
         null=True,
         verbose_name='脚本路径',
@@ -1089,7 +1089,7 @@ class Ansible_Playbook(models.Model):
         null=True
     )
     playbook_file = models.FileField(
-        upload_to='./upload/playbook/',
+        upload_to='./playbook/',
         verbose_name='剧本路径'
     )
     playbook_auth_group = models.SmallIntegerField(
@@ -1139,7 +1139,7 @@ class Ansible_Script(models.Model):
         null=True
     )
     script_file = models.FileField(
-        upload_to='./upload/script/',
+        upload_to='./script/',
         verbose_name='脚本路径'
     )
     script_service = models.SmallIntegerField(
