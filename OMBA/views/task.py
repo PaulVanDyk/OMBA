@@ -17,7 +17,7 @@ def task_model(request):
         # 获取注册的任务
         regTaskList = []
         for task in list(keys(cTasks)):
-            if task.startswith('OpsManage.tasks.ansible') or task.startswith('OpsManage.tasks.sched'):
+            if task.startswith('OMBA.tasks.ansible') or task.startswith('OMBA.tasks.sched'):
                 regTaskList.append(task)
         try:
             crontabList = CrontabSchedule.objects.all().order_by("-id")
@@ -229,7 +229,7 @@ def task_view(request):
             workList = WorkerState.objects.all()
             regTaskList = []
             for task in list(keys(cTasks)):
-                if task.startswith('OpsManage.tasks.ansible') or task.startswith('OpsManage.tasks.sched'):
+                if task.startswith('OMBA.tasks.ansible') or task.startswith('OMBA.tasks.sched'):
                     regTaskList.append(task)
         except Exception, ex:
             logger.warn(msg="获取Celery Task失败: {ex}".format(ex=str(ex)))

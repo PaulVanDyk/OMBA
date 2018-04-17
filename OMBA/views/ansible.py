@@ -270,7 +270,7 @@ def apps_upload(request):
 
 
 @login_required()
-@permission_required('OpsManage.can_add_ansible_playbook', login_url='/noperm/')
+@permission_required('OMBA.can_add_ansible_playbook', login_url='/noperm/')
 def apps_online(request):
     if request.method == "GET":
         serverList = Server_Assets.objects.all()
@@ -371,7 +371,7 @@ def apps_online(request):
 
 
 @login_required()
-@permission_required('OpsManage.can_read_ansible_playbook', login_url='/noperm/')
+@permission_required('OMBA.can_read_ansible_playbook', login_url='/noperm/')
 def apps_list(request):
     if request.method == "GET":
         # 获取已登录用户的user id跟group id
@@ -400,7 +400,7 @@ def apps_list(request):
 
 
 @login_required()
-@permission_required('OpsManage.can_add_ansible_playbook', login_url='/noperm/')
+@permission_required('OMBA.can_add_ansible_playbook', login_url='/noperm/')
 def apps_playbook_file(request, pid):
     try:
         playbook = Ansible_Playbook.objects.get(id=pid)
@@ -437,7 +437,7 @@ def apps_playbook_file(request, pid):
 
 
 @login_required()
-@permission_required('OpsManage.can_read_ansible_playbook', login_url='/noperm/')
+@permission_required('OMBA.can_read_ansible_playbook', login_url='/noperm/')
 def apps_playbook_run(request, pid):
     try:
         playbook = Ansible_Playbook.objects.get(id=pid)
@@ -467,7 +467,7 @@ def apps_playbook_run(request, pid):
                 "numberList": numberList
             },
         )
-    elif request.method == "POST" and request.user.has_perm('OpsManage.can_exec_ansible_playbook'):
+    elif request.method == "POST" and request.user.has_perm('OMBA.can_exec_ansible_playbook'):
         if DsRedis.OpsAnsiblePlayBookLock.get(redisKey=playbook.playbook_uuid + '-locked') is None:  # 判断剧本是否有人在执行
             # 加上剧本执行锁
             DsRedis.OpsAnsiblePlayBookLock.set(redisKey=playbook.playbook_uuid + '-locked', value=request.user)
@@ -598,7 +598,7 @@ def apps_playbook_run(request, pid):
 
 
 @login_required()
-@permission_required('OpsManage.can_change_ansible_playbook', login_url='/noperm/')
+@permission_required('OMBA.can_change_ansible_playbook', login_url='/noperm/')
 def apps_playbook_modf(request, pid):
     try:
         playbook = Ansible_Playbook.objects.get(id=pid)
@@ -734,7 +734,7 @@ def apps_playbook_modf(request, pid):
 
 
 @login_required()
-@permission_required('OpsManage.can_change_ansible_playbook', login_url='/noperm/')
+@permission_required('OMBA.can_change_ansible_playbook', login_url='/noperm/')
 def apps_playbook_online_modf(request, pid):
     try:
         playbook = Ansible_Playbook.objects.get(id=pid)
@@ -894,7 +894,7 @@ def ansible_log_view(request, model, id):
 
 
 @login_required()
-@permission_required('OpsManage.can_read_ansible_script', login_url='/noperm/')
+@permission_required('OMBA.can_read_ansible_script', login_url='/noperm/')
 def apps_script_online(request):
     if request.method == "GET":
         serverList = Server_Assets.objects.all()
@@ -913,7 +913,7 @@ def apps_script_online(request):
                 "projectList": projectList
             }
         )
-    elif request.method == "POST" and request.user.has_perm('OpsManage.can_exec_ansible_script'):
+    elif request.method == "POST" and request.user.has_perm('OMBA.can_exec_ansible_script'):
         resource = []
         sList = []
 
@@ -1100,7 +1100,7 @@ def apps_script_online(request):
 
 
 @login_required()
-@permission_required('OpsManage.can_read_ansible_script', login_url='/noperm/')
+@permission_required('OMBA.can_read_ansible_script', login_url='/noperm/')
 def apps_script_list(request):
     if request.method == "GET":
         scriptList = Ansible_Script.objects.all()
@@ -1129,7 +1129,7 @@ def apps_script_list(request):
 
 
 @login_required()
-@permission_required('OpsManage.can_read_ansible_script', login_url='/noperm/')
+@permission_required('OMBA.can_read_ansible_script', login_url='/noperm/')
 def apps_script_file(request, pid):
     try:
         script = Ansible_Script.objects.get(id=pid)
@@ -1184,7 +1184,7 @@ def apps_script_file(request, pid):
 
 
 @login_required()
-@permission_required('OpsManage.can_read_ansible_script', login_url='/noperm/')
+@permission_required('OMBA.can_read_ansible_script', login_url='/noperm/')
 def apps_script_online_run(request, pid):
     try:
         script = Ansible_Script.objects.get(id=pid)
@@ -1242,7 +1242,7 @@ def apps_script_online_run(request, pid):
                 "projectList": projectList
             },
         )
-    elif request.method == "POST"and request.user.has_perm('OpsManage.can_exec_ansible_script'):
+    elif request.method == "POST"and request.user.has_perm('OMBA.can_exec_ansible_script'):
         resource = []
         sList = []
         if request.POST.get('server_model') in ['service', 'group', 'custom']:
