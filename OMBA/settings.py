@@ -133,8 +133,8 @@ INSTALLED_APPS = [
     'channels',
     'elfinder',
     'storages',
-    'wiki',
-    'api',
+    #'wiki',
+    #'api',
 ]
 
 MIDDLEWARE = [
@@ -242,9 +242,9 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'upload/')
 MEDIA_URL = '/upload/'
 SFTP_CONF = {
     'port': 22,
-    'username': 'root',
-    'password': 'welliam',
+    'username': 'atompi',
+    'password': 'atompi123',
     'timeout': 30
-}  # 修改成能sftp登陆OpsManage的账户
+}
 
 LOGIN_URL = '/login'

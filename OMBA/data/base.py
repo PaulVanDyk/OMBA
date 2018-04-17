@@ -231,7 +231,7 @@ class MySQL(object):
 
 if __name__ == '__main__':
     try:
-        mysql = MySQL('192.168.88.230', 33061, 'mysql', 'root', 'welliam')
+        mysql = MySQL('192.168.1.158', 3306, 'mysql', 'root', 'atompi123')
     except Exception, ex:
         print ex
     print mysql.getVariables()
