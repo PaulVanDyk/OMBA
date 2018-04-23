@@ -13,17 +13,58 @@ Including another URLconf
     1. Import the include() function: from django.conf.urls import url, include
     2. Add a URL to urlpatterns:  url(r'^blog/', include('blog.urls'))
 """
-from django.conf.urls import url
+from django.conf.urls import url, include
 from django.contrib import admin
 from OMBA.views import (
-    ansible
+    index,
+    assets,
+    cron,
+    deploy,
+    ansible,
+    users,
+    wssh,
+    task,
+    elfinder
 )
-from OMBA.restfull import (
-    ansible_api
-)
+from rest_framework.urlpatterns import format_suffix_patterns
 
 urlpatterns = [
+    url(r'^$', index.index),
     url(r'^admin/', admin.site.urls),
+    url(r'^login/', index.login),
+    url(r'^logout', index.logout),
+    url(r'^config', index.config),
+    url(r'^noperm', index.noperm),
+    url(r'^assets_config', assets.assets_config),
+    url(r'^assets_add', assets.assets_add),
+    url(r'^assets_list', assets.assets_list),
+    url(r'^assets_mod/(?P<aid>[0-9]+)/$', assets.assets_modf),
+    url(r'^assets_view/(?P<aid>[0-9]+)/$', assets.assets_view),
+    url(r'^assets_facts', assets.assets_facts),
+    url(r'^assets_log/(?P<page>[0-9]+)/$', assets.assets_log),
+    url(r'^assets_import/', assets.assets_import),
+    url(r'^assets_search/', assets.assets_search),
+    url(r'^assets_server/', assets.assets_server),
+    url(r'^assets/batch/', assets.assets_batch),
+    url(r'^assets/groups/(?P<id>[0-9]+)/$', assets.assets_groups),
+    url(r'^cron_add', cron.cron_add),
+    url(r'^cron_list/(?P<page>[0-9]+)/$', cron.cron_list),
+    url(r'^cron_config', cron.cron_config),
+    url(r'^cron_log/(?P<page>[0-9]+)/$', cron.cron_log),
+    url(r'^cron_mod/(?P<cid>[0-9]+)/$', cron.cron_mod),
+    url(r'^deploy_add', deploy.deploy_add),
+    url(r'^deploy_list', deploy.deploy_list),
+    url(r'^deploy_log/(?P<page>[0-9]+)/$', deploy.deploy_log),
+    url(r'^deploy_mod/(?P<pid>[0-9]+)/$', deploy.deploy_modf),
+    url(r'^deploy_init/(?P<pid>[0-9]+)/$', deploy.deploy_init),
+    url(r'^deploy_version/(?P<pid>[0-9]+)/$', deploy.deploy_version),
+    url(r'^deploy_run/(?P<pid>[0-9]+)/$', deploy.deploy_run),
+    url(r'^deploy_result/(?P<pid>[0-9]+)/$', deploy.deploy_result),
+    url(r'^deploy_ask/(?P<pid>[0-9]+)/$', deploy.deploy_ask),
+    url(r'^deploy_order/(?P<page>[0-9]+)/$', deploy.deploy_order),
+    url(r'^deploy_order/status/(?P<pid>[0-9]+)/$', deploy.deploy_order_status),
+    url(r'^deploy_order/rollback/(?P<pid>[0-9]+)/$', deploy.deploy_order_rollback),
+    url(r'^deploy_manage/(?P<pid>[0-9]+)/$', deploy.deploy_manage),
     url(r'^apps/$', ansible.apps_list),
     url(r'^apps/model/$', ansible.apps_model),
     url(r'^apps/script/online/$', ansible.apps_script_online),
@@ -39,8 +80,18 @@ urlpatterns = [
     url(r'^apps/playbook/run/(?P<pid>[0-9]+)/$', ansible.apps_playbook_run),
     url(r'^apps/playbook/modf/(?P<pid>[0-9]+)/$', ansible.apps_playbook_modf),
     url(r'^apps/playbook/online/modf/(?P<pid>[0-9]+)/$', ansible.apps_playbook_online_modf),
-    url(r'^api/playbook/$', ansible_api.playbook_list),
-    url(r'^api/playbook/(?P<id>[0-9]+)/$', ansible_api.playbook_detail),
-    url(r'^api/logs/ansible/model/(?P<id>[0-9]+)/$', ansible_api.modelLogsdetail),
-    url(r'^api/logs/ansible/playbook/(?P<id>[0-9]+)/$', ansible_api.playbookLogsdetail),
+    url(r'^task_model/$', task.task_model),
+    url(r'^task_view/$', task.task_view),
+    url(r'^task_search/$', task.task_search),
+    url(r'^users/manage$', users.user_manage),
+    url(r'^register/', users.register),
+    url(r'^user/(?P<uid>[0-9]+)/$', users.user),
+    url(r'^user/center/$', users.user_center),
+    url(r'^user/server/(?P<uid>[0-9]+)/$', users.user_server),
+    url(r'^group/(?P<gid>[0-9]+)/$', users.group),
+    url(r'^webssh/(?P<sid>[0-9]+)/$', wssh.wssh),
+    url(r'^roles/', elfinder.finder),
+    url(r'^elfinder/', include('elfinder.urls')),
 ]
+
+urlpatterns = format_suffix_patterns(urlpatterns)
