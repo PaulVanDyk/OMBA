@@ -92,6 +92,8 @@ urlpatterns = [
     url(r'^webssh/(?P<sid>[0-9]+)/$', wssh.wssh),
     url(r'^roles/', elfinder.finder),
     url(r'^elfinder/', include('elfinder.urls')),
+    url(r'^wiki/', include('wiki.urls')),
+    url(r'^api/', include('api.urls')),
 ]
 
 urlpatterns = format_suffix_patterns(urlpatterns)

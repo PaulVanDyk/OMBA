@@ -140,6 +140,7 @@ def user_center(request):
                 }
             )
 
+
 @login_required
 @permission_required('auth.change_user', login_url='/noperm/')
 def user(request, uid):

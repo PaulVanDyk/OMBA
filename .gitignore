@@ -1,5 +1,5 @@
 .idea/
 venv/
 *.pyc
-OMBA/migrations/
+*/migrations/
 *.log
