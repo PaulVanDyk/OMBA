@@ -19,7 +19,7 @@ def getBaseAssets():
     except:
         groupList = []
     try:
-        serviceList = Server_Assets.objects.all()
+        serviceList = Service_Assets.objects.all()
     except:
         serviceList = []
     try:
@@ -44,7 +44,7 @@ def getBaseAssets():
         "zone": zoneList,
         "line": lineList,
         "raid": raidList,
-        "porject": projectList
+        "project": projectList
     }
 
 
@@ -90,7 +90,7 @@ def assets_list(request):
     assetsNumber = Assets.objects.values('assets_type').annotate(dcount=Count('assets_type'))
     return render(
         request,
-        'assets_list.html',
+        'assets/assets_list.html',
         {
             "user": request.user,
             "totalAssets": assetsList.count(),
